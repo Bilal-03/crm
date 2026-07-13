@@ -489,7 +489,7 @@ export default function CRMApp() {
       user_id: user.id
     };
     
-    const data = { ...newActivity }; const error = null; await fetchApi('/activities', { method: 'POST', body: JSON.stringify(newActivity) });
+    let data; let error = null; try { data = await fetchApi('/activities', { method: 'POST', body: JSON.stringify(newActivity) }); } catch (e) { error = e; }
     
     if (error) {
       console.error('Error adding activity:', error);
@@ -516,7 +516,7 @@ export default function CRMApp() {
 
     console.log("Attempting to add lead:", dbLead); // Debug log
 
-    const data = { ...dbLead, id: 'temp-'+Date.now() }; const error = null; await fetchApi('/leads', { method: 'POST', body: JSON.stringify(dbLead) });
+    let data; let error = null; try { data = await fetchApi('/leads', { method: 'POST', body: JSON.stringify(dbLead) }); } catch (e) { error = e; }
 
     if (error) {
       console.error('Error adding lead:', error);
@@ -542,7 +542,7 @@ export default function CRMApp() {
       delete dbUpdates.quoteItems;
     }
 
-    const data = { ...dbUpdates }; const error = null; await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify(dbUpdates) });
+    let data; let error = null; try { data = await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify(dbUpdates) }); } catch (e) { error = e; }
 
     if (error) {
       console.error('Error updating lead:', error);
@@ -621,7 +621,7 @@ export default function CRMApp() {
       notes: meetingData.notes
     };
 
-    const data = { ...dbMeeting, id: 'temp-'+Date.now() }; const error = null; await fetchApi('/meetings', { method: 'POST', body: JSON.stringify(dbMeeting) });
+    let data; let error = null; try { data = await fetchApi('/meetings', { method: 'POST', body: JSON.stringify(dbMeeting) }); } catch (e) { error = e; }
 
     if (error) {
       console.error('Error adding meeting:', error);
