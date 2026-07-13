@@ -1,4 +1,4 @@
-import { createClerkClient } from '@clerk/backend';
+import { verifyToken } from '@clerk/backend';
 
 export async function verifyUser(req) {
   const token = req.headers.authorization?.split(' ')[1];
@@ -10,10 +10,8 @@ export async function verifyUser(req) {
     throw new Error('CLERK_SECRET_KEY is not set');
   }
 
-  const clerkClient = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
-  
   try {
-    const verified = await clerkClient.verifyToken(token, {
+    const verified = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY,
     });
     return verified.sub; // This is the user ID
