@@ -337,6 +337,12 @@ export default function CRMApp() {
     }
   }, [isLoaded, isSignedIn]);
 
+  useEffect(() => {
+    if (user) {
+      fetchData(user.id);
+    }
+  }, [user]);
+
   // Update customers when leads change
   useEffect(() => {
     if (user && leads.length > 0) {
