@@ -1,10 +1,10 @@
 # 🎯 CRM Pro - AI-Powered Sales Management System
 
-A modern, feature-rich CRM application built with React, Supabase, and AI-powered lead scoring. Streamline your sales pipeline with intelligent automation, beautiful analytics, and professional quote generation.
+A modern, feature-rich CRM application built with React, Neon & Clerk, and AI-powered lead scoring. Streamline your sales pipeline with intelligent automation, beautiful analytics, and professional quote generation.
 
 ![CRM Pro](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)
-![Supabase](https://img.shields.io/badge/Supabase-Database-3ECF8E?logo=supabase)
+![Neon](https://img.shields.io/badge/Neon-Database-00E599?logo=neon) ![Clerk](https://img.shields.io/badge/Clerk-Auth-6C47FF?logo=clerk)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ## ✨ Features
@@ -58,7 +58,7 @@ A modern, feature-rich CRM application built with React, Supabase, and AI-powere
 
 ### Prerequisites
 - Node.js 16+ and npm
-- Supabase account (free tier works!)
+- Neon & Clerk account (free tier works!)
 
 ### Installation
 
@@ -73,21 +73,21 @@ cd crm
 npm install
 ```
 
-3. **Set up Supabase**
-- Create a new project at [supabase.com](https://supabase.com)
+3. **Set up Neon & Clerk**
+- Create a new project at [neon.com](https://neon.com)
 - Get your Project URL and Anon Key from Project Settings → API
 - Update `crm-system.jsx` lines 66-67 with your credentials:
 
 ```javascript
-const supabase = createClient(
-  'YOUR_SUPABASE_URL',      // Replace with your Project URL
-  'YOUR_SUPABASE_ANON_KEY'  // Replace with your Anon Key
+const neon = createClient(
+  'YOUR_NEON_DATABASE_URL',      // Replace with your Project URL
+  'YOUR_CLERK_PUBLISHABLE_KEY'  // Replace with your Anon Key
 );
 ```
 
 4. **Create database tables**
 
-Run these SQL commands in your Supabase SQL Editor:
+Run these SQL commands in your Neon & Clerk SQL Editor:
 
 ```sql
 -- Leads table
@@ -181,9 +181,9 @@ The easiest way to deploy this application online is using **Vercel**, which pro
    - Click **Deploy**.
 
 3. **Configure Environment Variables** (If applicable)
-   - If your application uses environment variables (like Supabase keys) in `.env`, you must add them in Vercel.
+   - If your application uses environment variables (like Neon & Clerk keys) in `.env`, you must add them in Vercel.
    - Go to your Vercel Project Settings > Environment Variables.
-   - Add your keys (e.g., `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
+   - Add your keys (e.g., `NEON_DATABASE_URL`, `VITE_CLERK_PUBLISHABLE_KEY`).
    - Redeploy the project for the variables to take effect.
 
 Your app will be live on a `*.vercel.app` domain and will automatically redeploy whenever you push to the `main` branch!
@@ -211,7 +211,7 @@ crm/
 |------------|---------|
 | **React 18** | UI framework |
 | **Vite** | Build tool & dev server |
-| **Supabase** | Backend (Auth + Database) |
+| **Neon & Clerk** | Backend (Auth + Database) |
 | **Tailwind CSS** | Styling |
 | **Framer Motion** | Animations |
 | **Recharts** | Data visualization |
@@ -273,7 +273,7 @@ The CRM automatically scores each lead (0-100) based on:
 
 - ✅ Row Level Security (RLS) enabled on all tables
 - ✅ User data isolation (users only see their own data)
-- ✅ Secure authentication via Supabase Auth
+- ✅ Secure authentication via Neon & Clerk Auth
 - ✅ Protected API routes
 - ✅ No sensitive data in frontend
 
@@ -309,7 +309,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - Built with [React](https://reactjs.org/)
-- Database powered by [Supabase](https://supabase.com/)
+- Database powered by [Neon & Clerk](https://neon.com/)
 - Icons by [Lucide](https://lucide.dev/)
 - Charts by [Recharts](https://recharts.org/)
 

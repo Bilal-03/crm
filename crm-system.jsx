@@ -567,7 +567,7 @@ export default function CRMApp() {
     // Optimistic update
     setLeads(prev => prev.filter(l => l.id !== leadId));
     
-    const { error } = await fetchApi(`/leads?id=${ leadId }`, { method: 'DELETE' });
+    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'DELETE' }); } catch (e) { error = e; }
     
     if (error) {
       console.error('Error deleting lead:', error);
@@ -591,7 +591,7 @@ export default function CRMApp() {
     
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, notes: updatedNotes } : l));
     
-    const { error } = await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify({ notes: updatedNotes }) });
+    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify({ notes: updatedNotes }) }); } catch (e) { error = e; }
     if (error) console.error('Error adding note:', error);
     else addActivity('note_added', `Note added to lead`, leadId);
   };
@@ -611,7 +611,7 @@ export default function CRMApp() {
 
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, reminders: updatedReminders } : l));
     
-    const { error } = await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify({ reminders: updatedReminders }) });
+    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify({ reminders: updatedReminders }) }); } catch (e) { error = e; }
     if (error) console.error('Error adding reminder:', error);
     else addActivity('reminder_set', `Follow-up reminder set`, leadId);
   };
@@ -653,7 +653,7 @@ export default function CRMApp() {
       delete dbUpdates.dateTime;
     }
     
-    const { error } = await fetchApi(`/meetings?id=${ meetingId }`, { method: 'PUT', body: JSON.stringify(dbUpdates) });
+    let error = null; try { await fetchApi(`/meetings?id=${ meetingId }`, { method: 'PUT', body: JSON.stringify(dbUpdates) }); } catch (e) { error = e; }
     
     if (error) {
       console.error('Error updating meeting:', error);
@@ -667,7 +667,7 @@ export default function CRMApp() {
 
   const deleteMeeting = async (meetingId) => {
     setMeetings(prev => prev.filter(m => m.id !== meetingId));
-    const { error } = await fetchApi(`/meetings?id=${ meetingId }`, { method: 'DELETE' });
+    let error = null; try { await fetchApi(`/meetings?id=${ meetingId }`, { method: 'DELETE' }); } catch (e) { error = e; }
     if (error) console.error('Error deleting meeting:', error);
     else addActivity('meeting_deleted', `Meeting deleted`);
   };
