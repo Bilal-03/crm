@@ -290,7 +290,8 @@ const generateQuotePDF = (lead) => {
 
 // Main App Component
 export default function CRMApp() {
-  const [user, setUser] = useState(null);
+  const { user, isLoaded, isSignedIn } = useUser();
+  const { getToken } = useAuth();
   const [loading, setLoading] = useState(true);
 
   const fetchApi = async (endpoint, options = {}) => {
