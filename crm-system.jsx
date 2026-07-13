@@ -3274,7 +3274,7 @@ function generateInvoicePDF(invoice, customer) {
   doc.save(`Invoice_${invoice.invoice_number}.pdf`);
 }
 
-// Email Invoice Function using Supabase Edge Function
+// Email Invoice Function using Vercel Serverless Function
 async function sendInvoiceEmail(invoice, customer) {
   try {
     // Generate PDF as base64
