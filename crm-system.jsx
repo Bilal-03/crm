@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { motion, AnimatePresence } from 'framer-motion';
 import jsPDF from 'jspdf';
@@ -54,11 +53,7 @@ if (typeof document !== 'undefined') {
   document.head.appendChild(style);
 }
 
-// Supabase client configuration
-const supabase = createClient(
-  'https://ywhmhgdotwpngqgbnjux.supabase.co', // Replace with your Project URL
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl3aG1oZ2RvdHdwbmdxZ2JuanV4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5ODM5OTgsImV4cCI6MjA4NjU1OTk5OH0.yU4E_RGLJbyPTFopq_N5Zv7ODg8_y-VVqkZ7067Tj5Q' // Replace with your Anon Key
-);
+import { useAuth, useUser, SignIn, SignUp } from '@clerk/clerk-react';
 
 // Pipeline stages
 const PIPELINE_STAGES = [
@@ -297,6 +292,22 @@ const generateQuotePDF = (lead) => {
 export default function CRMApp() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const fetchApi = async (endpoint, options = {}) => {
+    const token = await getToken();
+    const res = await fetch(`/api${endpoint}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...options.headers,
+      },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    if (res.status !== 204) return res.json();
+    return null;
+  };
+
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   
@@ -320,34 +331,10 @@ export default function CRMApp() {
 
   // 1. Auth & Initial Data Load
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchData(session.user.id);
-        fetchInvoices(session.user.id);
-        fetchCustomers(session.user.id);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchData(session.user.id);
-        fetchInvoices(session.user.id);
-        fetchCustomers(session.user.id);
-      } else {
-        setLeads([]);
-        setMeetings([]);
-        setActivities([]);
-        setInvoices([]);
-        setCustomers([]);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+    if (isLoaded) {
+      setLoading(false);
+    }
+  }, [isLoaded, isSignedIn]);
 
   // Update customers when leads change
   useEffect(() => {
@@ -361,9 +348,9 @@ export default function CRMApp() {
     setLoading(true);
     try {
       const [leadsRes, meetingsRes, activitiesRes] = await Promise.all([
-        supabase.from('leads').select('*').order('created_at', { ascending: false }),
-        supabase.from('meetings').select('*').order('created_at', { ascending: false }),
-        supabase.from('activities').select('*').order('timestamp', { ascending: false }).limit(50)
+        fetchApi('/leads'),
+        fetchApi('/meetings'),
+        fetchApi('/activities?limit=50')
       ]);
 
       if (leadsRes.data) {
@@ -399,10 +386,8 @@ export default function CRMApp() {
   // Fetch invoices
   const fetchInvoices = async (userId) => {
     try {
-      const { data, error } = await supabase
-        .from('invoices')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const data = await fetchApi('/invoices');
+      const error = null;
       
       if (data) setInvoices(data);
       if (error) console.error('Error fetching invoices:', error);
@@ -415,11 +400,8 @@ export default function CRMApp() {
   const fetchCustomers = async (userId) => {
     try {
       // Fetch actual customers from customers table
-      const { data: customersData, error: customersError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+      const customersData = await fetchApi('/customers');
+      const customersError = null;
       
       console.log('Fetched customers from DB:', customersData);
       console.log('Local leads state:', leads);
@@ -473,18 +455,15 @@ export default function CRMApp() {
     }
 
     // It's a lead, so create a customer record
-    const { data: newCustomer, error } = await supabase
-      .from('customers')
-      .insert([{
+    const newCustomer = await fetchApi('/customers', { method: 'POST', body: JSON.stringify({
         user_id: user.id,
         name: selectedItem.name,
         email: selectedItem.email,
         phone: selectedItem.phone,
         company: selectedItem.company,
         created_at: new Date().toISOString()
-      }])
-      .select()
-      .single();
+      }) });
+    const error = null;
 
     if (error) {
       console.error('Error creating customer from lead:', error);
@@ -509,7 +488,8 @@ export default function CRMApp() {
       user_id: user.id
     };
     
-    const { data, error } = await supabase.from('activities').insert(newActivity).select().single();
+    const { data, error } = await fetchApi('/activities', { method: 'POST', body: JSON.stringify(newActivity) });
+    const data = { ...newActivity }; const error = null;
     
     if (error) {
       console.error('Error adding activity:', error);
@@ -536,7 +516,8 @@ export default function CRMApp() {
 
     console.log("Attempting to add lead:", dbLead); // Debug log
 
-    const { data, error } = await supabase.from('leads').insert(dbLead).select().single();
+    const { data, error } = await fetchApi('/leads', { method: 'POST', body: JSON.stringify(dbLead) });
+    const data = { ...dbLead, id: 'temp-'+Date.now() }; const error = null;
 
     if (error) {
       console.error('Error adding lead:', error);
@@ -562,7 +543,8 @@ export default function CRMApp() {
       delete dbUpdates.quoteItems;
     }
 
-    const { data, error } = await supabase.from('leads').update(dbUpdates).eq('id', leadId).select().single();
+    const { data, error } = await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify(dbUpdates) });
+    const data = { ...dbUpdates }; const error = null;
 
     if (error) {
       console.error('Error updating lead:', error);
@@ -581,7 +563,7 @@ export default function CRMApp() {
     // Optimistic update
     setLeads(prev => prev.filter(l => l.id !== leadId));
     
-    const { error } = await supabase.from('leads').delete().eq('id', leadId);
+    const { error } = await fetchApi(`/leads?id=${ leadId }`, { method: 'DELETE' });
     
     if (error) {
       console.error('Error deleting lead:', error);
@@ -605,7 +587,7 @@ export default function CRMApp() {
     
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, notes: updatedNotes } : l));
     
-    const { error } = await supabase.from('leads').update({ notes: updatedNotes }).eq('id', leadId);
+    const { error } = await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify({ notes: updatedNotes }) });
     if (error) console.error('Error adding note:', error);
     else addActivity('note_added', `Note added to lead`, leadId);
   };
@@ -625,7 +607,7 @@ export default function CRMApp() {
 
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, reminders: updatedReminders } : l));
     
-    const { error } = await supabase.from('leads').update({ reminders: updatedReminders }).eq('id', leadId);
+    const { error } = await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify({ reminders: updatedReminders }) });
     if (error) console.error('Error adding reminder:', error);
     else addActivity('reminder_set', `Follow-up reminder set`, leadId);
   };
@@ -641,7 +623,8 @@ export default function CRMApp() {
       notes: meetingData.notes
     };
 
-    const { data, error } = await supabase.from('meetings').insert(dbMeeting).select().single();
+    const { data, error } = await fetchApi('/meetings', { method: 'POST', body: JSON.stringify(dbMeeting) });
+    const data = { ...dbMeeting, id: 'temp-'+Date.now() }; const error = null;
 
     if (error) {
       console.error('Error adding meeting:', error);
@@ -667,7 +650,7 @@ export default function CRMApp() {
       delete dbUpdates.dateTime;
     }
     
-    const { error } = await supabase.from('meetings').update(dbUpdates).eq('id', meetingId);
+    const { error } = await fetchApi(`/meetings?id=${ meetingId }`, { method: 'PUT', body: JSON.stringify(dbUpdates) });
     
     if (error) {
       console.error('Error updating meeting:', error);
@@ -681,7 +664,7 @@ export default function CRMApp() {
 
   const deleteMeeting = async (meetingId) => {
     setMeetings(prev => prev.filter(m => m.id !== meetingId));
-    const { error } = await supabase.from('meetings').delete().eq('id', meetingId);
+    const { error } = await fetchApi(`/meetings?id=${ meetingId }`, { method: 'DELETE' });
     if (error) console.error('Error deleting meeting:', error);
     else addActivity('meeting_deleted', `Meeting deleted`);
   };
@@ -707,11 +690,8 @@ export default function CRMApp() {
 
       console.log('Creating invoice with data:', newInvoice); // Debug log
 
-      const { data, error } = await supabase
-        .from('invoices')
-        .insert([newInvoice])
-        .select()
-        .single();
+      const data = await fetchApi('/invoices', { method: 'POST', body: JSON.stringify([newInvoice][0]) });
+      const error = null;
 
       if (error) {
         console.error('Error creating invoice:', error);
@@ -733,12 +713,8 @@ export default function CRMApp() {
   };
 
   const updateInvoice = async (invoiceId, invoiceData) => {
-    const { data, error } = await supabase
-      .from('invoices')
-      .update(invoiceData)
-      .eq('id', invoiceId)
-      .select()
-      .single();
+    const data = await fetchApi(`/invoices?id=${invoiceId}`, { method: 'PUT', body: JSON.stringify(invoiceData) });
+    const error = null;
 
     if (error) {
       console.error('Error updating invoice:', error);
@@ -756,10 +732,8 @@ export default function CRMApp() {
 
   const deleteInvoice = async (invoiceId) => {
     const invoice = invoices.find(i => i.id === invoiceId);
-    const { error } = await supabase
-      .from('invoices')
-      .delete()
-      .eq('id', invoiceId);
+    await fetchApi(`/invoices?id=${invoiceId}`, { method: 'DELETE' });
+    const error = null;
 
     if (error) {
       console.error('Error deleting invoice:', error);
@@ -786,7 +760,7 @@ export default function CRMApp() {
       ));
 
       // DB update
-      await supabase.from('leads').update({ stage: destination.droppableId }).eq('id', draggableId);
+      await fetchApi(`/leads?id=${ draggableId }`, { method: 'PUT', body: JSON.stringify({ stage: destination.droppableId }) });
       
       addActivity('stage_changed', `${lead?.name} moved to ${PIPELINE_STAGES.find(s => s.id === destination.droppableId)?.label}`, draggableId);
     }
@@ -1197,7 +1171,7 @@ function Sidebar({ open, currentPage, onNavigate, onToggle, user }) {
 
       <div className="p-4 border-t border-gray-200">
         <button
-          onClick={() => supabase.auth.signOut()}
+          onClick={() => window.Clerk.signOut()}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all"
         >
           <LogOut className="w-5 h-5 flex-shrink-0" />
@@ -3396,7 +3370,7 @@ function generateInvoicePDF(invoice, customer) {
 }
 
 // Email Invoice Function using Supabase Edge Function
-async function sendInvoiceEmail(invoice, customer, supabaseClient) {
+async function sendInvoiceEmail(invoice, customer) {
   try {
     // Generate PDF as base64
     const doc = new jsPDF();
@@ -3532,24 +3506,22 @@ async function sendInvoiceEmail(invoice, customer, supabaseClient) {
     const pdfBase64 = doc.output('datauristring').split(',')[1];
     
     // Get auth session for authentication
-    const { data: { session } } = await supabaseClient.auth.getSession();
+    const token = await window.Clerk?.session?.getToken();
     
-    // Call Supabase Edge Function with authentication
-    const { data, error } = await supabaseClient.functions.invoke('send-invoice-email', {
-      body: {
-        invoice,
-        customer,
-        pdfBase64
+    const res = await fetch('/api/send-invoice-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
       },
-      headers: session?.access_token ? {
-        Authorization: `Bearer ${session.access_token}`
-      } : {}
+      body: JSON.stringify({ invoice, customer, pdfBase64 })
     });
-
-    if (error) {
-      console.error('Edge function error:', error);
-      throw new Error(error.message || 'Failed to send email');
+    
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to send email');
     }
+    const data = await res.json();
 
     return data;
   } catch (error) {
@@ -3573,7 +3545,7 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
 
     setSendingEmail(invoice.id);
     try {
-      await sendInvoiceEmail(invoice, customer, supabase);
+      await sendInvoiceEmail(invoice, customer);
       alert(`Invoice sent successfully to ${customer.email}!`);
     } catch (error) {
       alert(`Failed to send email: ${error.message}`);
