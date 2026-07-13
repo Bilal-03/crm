@@ -64,8 +64,8 @@ A modern, feature-rich CRM application built with React, Supabase, and AI-powere
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/crm-pro.git
-cd crm-pro
+git clone https://github.com/Bilal-03/crm.git
+cd crm
 ```
 
 2. **Install dependencies**
@@ -165,10 +165,33 @@ npm run dev
 6. **Open your browser**
 Navigate to `http://localhost:5173`
 
+## ☁️ Deployment
+
+The easiest way to deploy this application online is using **Vercel**, which provides built-in support for Vite and React applications.
+
+1. **Push your code to GitHub**
+   Make sure all your latest changes are pushed to your GitHub repository.
+
+2. **Deploy to Vercel**
+   - Go to [Vercel.com](https://vercel.com) and log in with your GitHub account.
+   - Click **Add New** > **Project**.
+   - Import your `crm` repository from GitHub.
+   - Vercel will automatically detect that it's a Vite project.
+   - Leave the default build settings (Build Command: `npm run build`, Output Directory: `dist`).
+   - Click **Deploy**.
+
+3. **Configure Environment Variables** (If applicable)
+   - If your application uses environment variables (like Supabase keys) in `.env`, you must add them in Vercel.
+   - Go to your Vercel Project Settings > Environment Variables.
+   - Add your keys (e.g., `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`).
+   - Redeploy the project for the variables to take effect.
+
+Your app will be live on a `*.vercel.app` domain and will automatically redeploy whenever you push to the `main` branch!
+
 ## 📁 Project Structure
 
 ```
-crm-pro/
+crm/
 ├── src/
 │   ├── main.jsx           # React entry point
 │   └── index.css          # Tailwind CSS imports
@@ -280,9 +303,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👨‍💻 Author
 
-**Your Name**
-- GitHub: [@yourusername](https://github.com/yourusername)
-- LinkedIn: [Your LinkedIn](https://linkedin.com/in/yourprofile)
+**Bilal**
+- GitHub: [@Bilal-03](https://github.com/Bilal-03)
 
 ## 🙏 Acknowledgments
 
