@@ -393,8 +393,13 @@ export default function CRMApp() {
   // Fetch invoices
   const fetchInvoices = async (userId) => {
     try {
-      const data = await fetchApi('/invoices');
-      const error = null;
+      let data;
+      let error = null;
+      try {
+        data = await fetchApi('/invoices');
+      } catch (e) {
+        error = e;
+      }
       
       if (data) setInvoices(data);
       if (error) console.error('Error fetching invoices:', error);
@@ -462,7 +467,10 @@ export default function CRMApp() {
     }
 
     // It's a lead, so create a customer record
-    const newCustomer = await fetchApi('/customers', { method: 'POST', body: JSON.stringify({
+    let newCustomer;
+    let error = null;
+    try {
+      newCustomer = await fetchApi('/customers', { method: 'POST', body: JSON.stringify({
         user_id: user.id,
         name: selectedItem.name,
         email: selectedItem.email,
@@ -470,7 +478,9 @@ export default function CRMApp() {
         company: selectedItem.company,
         created_at: new Date().toISOString()
       }) });
-    const error = null;
+    } catch (e) {
+      error = e;
+    }
 
     if (error) {
       console.error('Error creating customer from lead:', error);
@@ -693,8 +703,13 @@ export default function CRMApp() {
 
       console.log('Creating invoice with data:', newInvoice); // Debug log
 
-      const data = await fetchApi('/invoices', { method: 'POST', body: JSON.stringify([newInvoice][0]) });
-      const error = null;
+      let data;
+      let error = null;
+      try {
+        data = await fetchApi('/invoices', { method: 'POST', body: JSON.stringify([newInvoice][0]) });
+      } catch (e) {
+        error = e;
+      }
 
       if (error) {
         console.error('Error creating invoice:', error);
@@ -716,8 +731,13 @@ export default function CRMApp() {
   };
 
   const updateInvoice = async (invoiceId, invoiceData) => {
-    const data = await fetchApi(`/invoices?id=${invoiceId}`, { method: 'PUT', body: JSON.stringify(invoiceData) });
-    const error = null;
+    let data;
+    let error = null;
+    try {
+      data = await fetchApi(`/invoices?id=${invoiceId}`, { method: 'PUT', body: JSON.stringify(invoiceData) });
+    } catch (e) {
+      error = e;
+    }
 
     if (error) {
       console.error('Error updating invoice:', error);
@@ -735,8 +755,12 @@ export default function CRMApp() {
 
   const deleteInvoice = async (invoiceId) => {
     const invoice = invoices.find(i => i.id === invoiceId);
-    await fetchApi(`/invoices?id=${invoiceId}`, { method: 'DELETE' });
-    const error = null;
+    let error = null;
+    try {
+      await fetchApi(`/invoices?id=${invoiceId}`, { method: 'DELETE' });
+    } catch (e) {
+      error = e;
+    }
 
     if (error) {
       console.error('Error deleting invoice:', error);
