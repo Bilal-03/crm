@@ -14,6 +14,7 @@
     "@clerk/clerk-react": "^5.61.8",
     "@google/generative-ai": "^0.24.1",
     "@hello-pangea/dnd": "^18.0.1",
+    "@neondatabase/serverless": "^1.1.0",
     "@react-oauth/google": "^0.13.4",
     "@supabase/supabase-js": "^2.39.0",
     "framer-motion": "^11.0.0",
