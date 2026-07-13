@@ -802,7 +802,11 @@ export default function CRMApp() {
   }
 
   if (!user) {
-    return <AuthPage />;
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-gray-50 via-white to-gray-100">
+        <SignIn routing="hash" />
+      </div>
+    );
   }
 
   return (
@@ -981,132 +985,6 @@ export default function CRMApp() {
   );
 }
 
-// Auth Page Component
-function AuthPage() {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleAuth = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({ 
-          email, 
-          password,
-          options: {
-            data: { name }
-          }
-        });
-        if (error) throw error;
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-gray-50 via-white to-gray-100">
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-2xl p-8 w-full max-w-md shadow-2xl bg-white border border-gray-200"
-      >
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] rounded-2xl mb-4">
-            <Target className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] bg-clip-text text-transparent mb-2">
-            CRM Pro
-          </h1>
-          <p className="text-gray-600">
-            Manage your sales pipeline with ease
-          </p>
-        </div>
-
-        <form onSubmit={handleAuth} className="space-y-4">
-          {!isLogin && (
-            <div>
-              <label className="block text-sm font-medium mb-2 text-gray-900">
-                Name
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-3 rounded-lg focus:ring-2 focus:ring-[#6366F1] focus:border-transparent outline-none transition-all bg-gray-50 border border-gray-300 text-gray-900 placeholder-gray-400"
-                required={!isLogin}
-                placeholder="Enter your name"
-              />
-            </div>
-          )}
-          
-          <div>
-            <label className="block text-sm font-medium mb-2 text-gray-900">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 rounded-lg focus:ring-2 focus:ring-[#6366F1] focus:border-transparent outline-none transition-all bg-gray-50 border border-gray-300 text-gray-900 placeholder-gray-400"
-              required
-              placeholder="Enter your email"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2 text-gray-900">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 rounded-lg focus:ring-2 focus:ring-[#6366F1] focus:border-transparent outline-none transition-all bg-gray-50 border border-gray-300 text-gray-900 placeholder-gray-400"
-              required
-              placeholder="Enter your password"
-            />
-          </div>
-
-          {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-600 text-sm">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white rounded-lg font-semibold hover:shadow-lg hover:shadow-[#6366F1]/50 transition-all disabled:opacity-50"
-          >
-            {loading ? 'Loading...' : (isLogin ? 'Sign In' : 'Sign Up')}
-          </button>
-        </form>
-
-        <div className="mt-6 text-center">
-          <button
-            onClick={() => setIsLogin(!isLogin)}
-            className="text-[#6366F1] hover:text-[#8B5CF6] transition-colors text-sm font-medium"
-          >
-            {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
 
 // Sidebar Component
 function Sidebar({ open, currentPage, onNavigate, onToggle, user }) {
