@@ -1,8 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { motion, AnimatePresence } from 'framer-motion';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, 
   ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area 
@@ -53,7 +51,18 @@ if (typeof document !== 'undefined') {
   document.head.appendChild(style);
 }
 
-import { useAuth, useUser, SignIn, SignUp } from '@clerk/clerk-react';
+import { useAuth, useClerk, useUser, SignIn } from '@clerk/clerk-react';
+import { createApiClient } from './src/lib/api-client.js';
+
+let pdfLibrariesPromise;
+const loadPdfLibraries = () => {
+  pdfLibrariesPromise ??= Promise.all([import('jspdf'), import('jspdf-autotable')])
+    .then(([jspdfModule, autoTableModule]) => ({
+      jsPDF: jspdfModule.default,
+      autoTable: autoTableModule.default,
+    }));
+  return pdfLibrariesPromise;
+};
 
 // Pipeline stages
 const PIPELINE_STAGES = [
@@ -78,8 +87,12 @@ const exportToCSV = (data, filename) => {
     lead.notes?.[0]?.text || ''
   ]);
   
-  const csv = [headers, ...rows].map(row => 
-    row.map(cell => `"${cell}"`).join(',')
+  const csv = [headers, ...rows].map(row =>
+    row.map(cell => {
+      const raw = String(cell ?? '');
+      const formulaSafe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+      return `"${formulaSafe.replaceAll('"', '""')}"`;
+    }).join(',')
   ).join('\n');
   
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -133,7 +146,8 @@ const generateEmailUrl = (lead) => {
 };
 
 // 3. Professional PDF Quote Generator
-const generateQuotePDF = (lead) => {
+const generateQuotePDF = async (lead) => {
+  const { jsPDF, autoTable } = await loadPdfLibraries();
   const doc = new jsPDF();
   
   // -- CONFIGURATION --
@@ -285,29 +299,19 @@ const generateQuotePDF = (lead) => {
   doc.setTextColor(brandColor[0], brandColor[1], brandColor[2]);
   doc.text(text, x, pageHeight - 8);
 
-  doc.save(`Quote_Q-${Math.floor(Math.random() * 10000)}_${lead.name.replace(/\s+/g, '_')}.pdf`);
+  const safeLeadName = lead.name.replace(/[^a-z0-9_-]/gi, '_').slice(0, 80);
+  doc.save(`Quote_Q-${Math.floor(Math.random() * 10000)}_${safeLeadName}.pdf`);
 };
 
 // Main App Component
 export default function CRMApp() {
   const { user, isLoaded, isSignedIn } = useUser();
   const { getToken } = useAuth();
+  const { signOut } = useClerk();
   const [loading, setLoading] = useState(true);
 
-  const fetchApi = async (endpoint, options = {}) => {
-    const token = await getToken();
-    const res = await fetch(`/api${endpoint}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        ...options.headers,
-      },
-    });
-    if (!res.ok) throw new Error(await res.text());
-    if (res.status !== 204) return res.json();
-    return null;
-  };
+  const api = useMemo(() => createApiClient(getToken), [getToken]);
+  const fetchApi = api.request;
 
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -317,7 +321,7 @@ export default function CRMApp() {
   const [meetings, setMeetings] = useState([]);
   const [activities, setActivities] = useState([]);
   const [invoices, setInvoices] = useState([]);
-  const [customers, setCustomers] = useState([]);
+  const [customerRecords, setCustomerRecords] = useState([]);
   
   // UI states
   const [selectedLead, setSelectedLead] = useState(null);
@@ -343,26 +347,36 @@ export default function CRMApp() {
     }
   }, [user]);
 
-  // Update customers when leads change
-  useEffect(() => {
-    if (user && leads.length > 0) {
-      fetchCustomers(user.id);
-    }
-  }, [leads, user]);
+  const customers = useMemo(() => {
+    const persisted = customerRecords.map(customer => ({ ...customer, isCustomer: true }));
+    const customerEmails = new Set(persisted.map(customer => customer.email.toLowerCase()));
+    const leadCustomers = leads
+      .filter(lead => !customerEmails.has(lead.email.toLowerCase()))
+      .map(lead => ({
+        id: lead.id,
+        name: lead.name,
+        email: lead.email,
+        phone: lead.phone,
+        company: lead.company,
+        isCustomer: false,
+      }));
+    return [...persisted, ...leadCustomers];
+  }, [customerRecords, leads]);
 
   // 2. Fetch Data Helper (With Data Mapping)
   const fetchData = async (userId) => {
     setLoading(true);
     try {
-      const [leadsRes, meetingsRes, activitiesRes] = await Promise.all([
+      const [leadsRes, meetingsRes, activitiesRes, invoiceRows, customerRows] = await Promise.all([
         fetchApi('/leads'),
         fetchApi('/meetings'),
-        fetchApi('/activities?limit=50')
+        fetchApi('/activities?limit=50'),
+        fetchApi('/invoices'),
+        fetchApi('/customers'),
       ]);
 
-      if (leadsRes.data) {
-        // Map DB snake_case to Frontend camelCase
-        const mappedLeads = leadsRes.data.map(l => ({
+      if (leadsRes) {
+        const mappedLeads = leadsRes.map(l => ({
           ...l,
           createdAt: l.created_at,
           quoteItems: l.quote_items || []
@@ -370,8 +384,8 @@ export default function CRMApp() {
         setLeads(mappedLeads);
       }
 
-      if (meetingsRes.data) {
-        const mappedMeetings = meetingsRes.data.map(m => ({
+      if (meetingsRes) {
+        const mappedMeetings = meetingsRes.map(m => ({
           ...m,
           dateTime: m.date_time,
           leadId: m.lead_id,
@@ -380,9 +394,9 @@ export default function CRMApp() {
         setMeetings(mappedMeetings);
       }
 
-      if (activitiesRes.data) {
-        setActivities(activitiesRes.data);
-      }
+      setActivities(activitiesRes || []);
+      setInvoices(invoiceRows || []);
+      setCustomerRecords(customerRows || []);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -390,63 +404,11 @@ export default function CRMApp() {
     }
   };
 
-  // Fetch invoices
-  const fetchInvoices = async (userId) => {
-    try {
-      let data;
-      let error = null;
-      try {
-        data = await fetchApi('/invoices');
-      } catch (e) {
-        error = e;
-      }
-      
-      if (data) setInvoices(data);
-      if (error) console.error('Error fetching invoices:', error);
-    } catch (error) {
-      console.error('Error fetching invoices:', error);
-    }
-  };
-
   // Fetch customers
-  const fetchCustomers = async (userId) => {
+  const fetchCustomers = async () => {
     try {
-      // Fetch actual customers from customers table
       const customersData = await fetchApi('/customers');
-      const customersError = null;
-      
-      console.log('Fetched customers from DB:', customersData);
-      console.log('Local leads state:', leads);
-
-      // Combine both into customers list
-      const allCustomers = [];
-      
-      // Add actual customers first
-      if (customersData && customersData.length > 0) {
-        allCustomers.push(...customersData.map(c => ({
-          ...c,
-          isCustomer: true
-        })));
-      }
-      
-      // Add ALL leads from local state (not from database)
-      if (leads && leads.length > 0) {
-        const existingCustomerEmails = customersData?.map(c => c.email) || [];
-        const leadsAsCustomers = leads
-          .filter(lead => !existingCustomerEmails.includes(lead.email))
-          .map(lead => ({
-            id: lead.id,
-            name: lead.name,
-            email: lead.email,
-            phone: lead.phone,
-            company: lead.company,
-            isCustomer: false // Mark as lead
-          }));
-        allCustomers.push(...leadsAsCustomers);
-      }
-      
-      console.log('All customers/leads combined:', allCustomers);
-      setCustomers(allCustomers);
+      setCustomerRecords(customersData || []);
     } catch (error) {
       console.error('Error fetching customers:', error);
     }
@@ -470,14 +432,12 @@ export default function CRMApp() {
     let newCustomer;
     let error = null;
     try {
-      newCustomer = await fetchApi('/customers', { method: 'POST', body: JSON.stringify({
-        user_id: user.id,
+      newCustomer = await fetchApi('/customers', { method: 'POST', body: {
         name: selectedItem.name,
         email: selectedItem.email,
         phone: selectedItem.phone,
-        company: selectedItem.company,
-        created_at: new Date().toISOString()
-      }) });
+        company: selectedItem.company
+      } });
     } catch (e) {
       error = e;
     }
@@ -488,7 +448,7 @@ export default function CRMApp() {
     }
 
     // Refresh customers list
-    await fetchCustomers(user.id);
+    await fetchCustomers();
     
     return newCustomer.id;
   };
@@ -498,14 +458,12 @@ export default function CRMApp() {
   // Add Activity
   const addActivity = async (type, message, leadId = null) => {
     const newActivity = {
-      id: crypto.randomUUID(), // FIXED: Generate ID
       type,
       message,
-      lead_id: leadId,
-      user_id: user.id
+      lead_id: leadId
     };
     
-    let data; let error = null; try { data = await fetchApi('/activities', { method: 'POST', body: JSON.stringify(newActivity) }); } catch (e) { error = e; }
+    let data; let error = null; try { data = await fetchApi('/activities', { method: 'POST', body: newActivity }); } catch (e) { error = e; }
     
     if (error) {
       console.error('Error adding activity:', error);
@@ -521,22 +479,18 @@ export default function CRMApp() {
   const addLead = async (leadData) => {
     const { quoteItems, ...rest } = leadData;
     const dbLead = {
-      id: crypto.randomUUID(), // FIXED: Generate ID
       ...rest,
-      user_id: user.id,
       stage: leadData.stage || 'new',
       quote_items: quoteItems || [],
       notes: [],
       reminders: []
     };
 
-    console.log("Attempting to add lead:", dbLead); // Debug log
-
-    let data; let error = null; try { data = await fetchApi('/leads', { method: 'POST', body: JSON.stringify(dbLead) }); } catch (e) { error = e; }
+    let data; let error = null; try { data = await fetchApi('/leads', { method: 'POST', body: dbLead }); } catch (e) { error = e; }
 
     if (error) {
       console.error('Error adding lead:', error);
-      alert('Failed to add lead. Check console for details.');
+      alert(error.message || 'Failed to add lead.');
       return;
     }
 
@@ -558,7 +512,7 @@ export default function CRMApp() {
       delete dbUpdates.quoteItems;
     }
 
-    let data; let error = null; try { data = await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify(dbUpdates) }); } catch (e) { error = e; }
+    let data; let error = null; try { data = await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: dbUpdates }); } catch (e) { error = e; }
 
     if (error) {
       console.error('Error updating lead:', error);
@@ -574,14 +528,15 @@ export default function CRMApp() {
   };
 
   const deleteLead = async (leadId) => {
-    // Optimistic update
+    const previousLeads = leads;
     setLeads(prev => prev.filter(l => l.id !== leadId));
     
     let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'DELETE' }); } catch (e) { error = e; }
     
     if (error) {
       console.error('Error deleting lead:', error);
-      // Revert if needed, or alert user
+      setLeads(previousLeads);
+      alert(error.message || 'Failed to delete lead.');
     } else {
       addActivity('lead_deleted', 'Lead deleted');
     }
@@ -601,8 +556,11 @@ export default function CRMApp() {
     
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, notes: updatedNotes } : l));
     
-    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify({ notes: updatedNotes }) }); } catch (e) { error = e; }
-    if (error) console.error('Error adding note:', error);
+    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: { notes: updatedNotes } }); } catch (e) { error = e; }
+    if (error) {
+      setLeads(prev => prev.map(item => item.id === leadId ? lead : item));
+      console.error('Error adding note:', error);
+    }
     else addActivity('note_added', `Note added to lead`, leadId);
   };
 
@@ -621,23 +579,24 @@ export default function CRMApp() {
 
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, reminders: updatedReminders } : l));
     
-    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: JSON.stringify({ reminders: updatedReminders }) }); } catch (e) { error = e; }
-    if (error) console.error('Error adding reminder:', error);
+    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: { reminders: updatedReminders } }); } catch (e) { error = e; }
+    if (error) {
+      setLeads(prev => prev.map(item => item.id === leadId ? lead : item));
+      console.error('Error adding reminder:', error);
+    }
     else addActivity('reminder_set', `Follow-up reminder set`, leadId);
   };
 
   // 4. Meeting Operations
   const addMeeting = async (meetingData) => {
     const dbMeeting = {
-      id: crypto.randomUUID(), // FIXED: Generate ID
-      user_id: user.id,
       lead_id: meetingData.leadId,
       title: meetingData.title,
       date_time: meetingData.dateTime,
       notes: meetingData.notes
     };
 
-    let data; let error = null; try { data = await fetchApi('/meetings', { method: 'POST', body: JSON.stringify(dbMeeting) }); } catch (e) { error = e; }
+    let data; let error = null; try { data = await fetchApi('/meetings', { method: 'POST', body: dbMeeting }); } catch (e) { error = e; }
 
     if (error) {
       console.error('Error adding meeting:', error);
@@ -663,13 +622,18 @@ export default function CRMApp() {
       delete dbUpdates.dateTime;
     }
     
-    let error = null; try { await fetchApi(`/meetings?id=${ meetingId }`, { method: 'PUT', body: JSON.stringify(dbUpdates) }); } catch (e) { error = e; }
+    let data; let error = null; try { data = await fetchApi(`/meetings?id=${ meetingId }`, { method: 'PUT', body: dbUpdates }); } catch (e) { error = e; }
     
     if (error) {
       console.error('Error updating meeting:', error);
     } else {
-      setMeetings(prev => prev.map(meeting => 
-        meeting.id === meetingId ? { ...meeting, ...updates } : meeting
+      setMeetings(prev => prev.map(meeting =>
+        meeting.id === meetingId ? {
+          ...data,
+          dateTime: data.date_time,
+          leadId: data.lead_id,
+          createdAt: data.created_at,
+        } : meeting
       ));
       addActivity('meeting_updated', `Meeting updated`, updates.leadId);
     }
@@ -683,12 +647,6 @@ export default function CRMApp() {
   };
 
   // Invoice Operations
-  const generateInvoiceNumber = () => {
-    const prefix = 'INV';
-    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-    return `${prefix}-${random}`;
-  };
-
   const addInvoice = async (invoiceData) => {
     try {
       // First, ensure the customer exists in the customers table
@@ -696,17 +654,13 @@ export default function CRMApp() {
       
       const newInvoice = {
         ...invoiceData,
-        customer_id: validCustomerId,
-        invoice_number: generateInvoiceNumber(),
-        user_id: user.id
+        customer_id: validCustomerId
       };
-
-      console.log('Creating invoice with data:', newInvoice); // Debug log
 
       let data;
       let error = null;
       try {
-        data = await fetchApi('/invoices', { method: 'POST', body: JSON.stringify([newInvoice][0]) });
+        data = await fetchApi('/invoices', { method: 'POST', body: newInvoice });
       } catch (e) {
         error = e;
       }
@@ -734,7 +688,7 @@ export default function CRMApp() {
     let data;
     let error = null;
     try {
-      data = await fetchApi(`/invoices?id=${invoiceId}`, { method: 'PUT', body: JSON.stringify(invoiceData) });
+      data = await fetchApi(`/invoices?id=${invoiceId}`, { method: 'PUT', body: invoiceData });
     } catch (e) {
       error = e;
     }
@@ -787,9 +741,13 @@ export default function CRMApp() {
       ));
 
       // DB update
-      await fetchApi(`/leads?id=${ draggableId }`, { method: 'PUT', body: JSON.stringify({ stage: destination.droppableId }) });
-      
-      addActivity('stage_changed', `${lead?.name} moved to ${PIPELINE_STAGES.find(s => s.id === destination.droppableId)?.label}`, draggableId);
+      try {
+        await fetchApi(`/leads?id=${ draggableId }`, { method: 'PUT', body: { stage: destination.droppableId } });
+        addActivity('stage_changed', `${lead?.name} moved to ${PIPELINE_STAGES.find(s => s.id === destination.droppableId)?.label}`, draggableId);
+      } catch (error) {
+        setLeads(prev => prev.map(item => item.id === draggableId ? lead : item));
+        alert(error.message || 'Failed to move lead.');
+      }
     }
   };
 
@@ -847,7 +805,7 @@ export default function CRMApp() {
         currentPage={currentPage}
         onNavigate={setCurrentPage}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
-        user={user}
+        onSignOut={signOut}
       />
 
       {/* Main Content */}
@@ -946,6 +904,7 @@ export default function CRMApp() {
                   setShowInvoiceModal(true);
                 }}
                 onDeleteInvoice={deleteInvoice}
+                onSendInvoice={(invoice, customer) => sendInvoiceEmail(invoice, customer, getToken)}
               />
             )}
           </AnimatePresence>
@@ -1017,7 +976,7 @@ export default function CRMApp() {
 
 
 // Sidebar Component
-function Sidebar({ open, currentPage, onNavigate, onToggle, user }) {
+function Sidebar({ open, currentPage, onNavigate, onSignOut }) {
   const menuItems = [
     { id: 'dashboard', icon: Home, label: 'Dashboard' },
     { id: 'leads', icon: Users, label: 'Leads' },
@@ -1076,7 +1035,7 @@ function Sidebar({ open, currentPage, onNavigate, onToggle, user }) {
 
       <div className="p-4 border-t border-gray-200">
         <button
-          onClick={() => window.Clerk.signOut()}
+          onClick={() => signOut()}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all"
         >
           <LogOut className="w-5 h-5 flex-shrink-0" />
@@ -1110,10 +1069,10 @@ function Header({ user, onToggleSidebar, overdueCount }) {
           <div className="flex items-center gap-3">
             <div className="text-right">
               <p className="text-sm font-medium text-gray-900">
-                {user.user_metadata?.name || user.email}
+                {user.fullName || user.primaryEmailAddress?.emailAddress || 'CRM User'}
               </p>
               <p className="text-xs text-gray-500">
-                {user.email}
+                {user.primaryEmailAddress?.emailAddress || ''}
               </p>
             </div>
             <div className="w-10 h-10 bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] rounded-full flex items-center justify-center">
@@ -2048,7 +2007,7 @@ function LeadsPage({
 
                         {/* ✅ PDF Quote Button (FIXED) */}
                         <button
-                          onClick={() => generateQuotePDF(lead)} 
+                          onClick={() => void generateQuotePDF(lead)}
                           className="p-2 hover:bg-green-50 rounded-lg transition-colors text-green-600"
                           title="Generate PDF Quote"
                         >
@@ -2960,17 +2919,8 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
     title: '',
     leadId: '',
     dateTime: '',
-    notes: '',
-    syncToGoogleCalendar: true // New field for calendar sync
+    notes: ''
   });
-
-  const [isGoogleAuthorized, setIsGoogleAuthorized] = useState(false);
-
-  // Check if Google Calendar is authorized
-  useEffect(() => {
-    const googleToken = localStorage.getItem('google_calendar_token');
-    setIsGoogleAuthorized(!!googleToken);
-  }, []);
 
   // Populate form if editing existing meeting
   useEffect(() => {
@@ -2979,34 +2929,17 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
         title: meeting.title || '',
         leadId: meeting.leadId || '',
         dateTime: meeting.dateTime || '',
-        notes: meeting.notes || '',
-        syncToGoogleCalendar: meeting.syncToGoogleCalendar !== false
+        notes: meeting.notes || ''
       });
     } else {
       setFormData({
         title: '',
         leadId: '',
         dateTime: '',
-        notes: '',
-        syncToGoogleCalendar: true
+        notes: ''
       });
     }
   }, [meeting]);
-
-  const handleGoogleAuth = () => {
-    // Open Google OAuth popup
-    const clientId = ''; // User needs to add their Google Client ID here
-    if (!clientId) {
-      alert('Please add your Google Client ID to enable calendar sync. See GOOGLE-CALENDAR-SETUP.md for instructions.');
-      return;
-    }
-    
-    const redirectUri = window.location.origin;
-    const scope = 'https://www.googleapis.com/auth/calendar.events';
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=token&scope=${scope}`;
-    
-    window.open(authUrl, 'Google Calendar Authorization', 'width=500,height=600');
-  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -3141,7 +3074,8 @@ function InvoiceStatusBadge({ status }) {
 }
 
 // Generate Invoice PDF
-function generateInvoicePDF(invoice, customer) {
+async function generateInvoicePDF(invoice, customer) {
+  const { jsPDF, autoTable } = await loadPdfLibraries();
   const doc = new jsPDF();
   
   const brandColor = [99, 102, 241];
@@ -3275,8 +3209,9 @@ function generateInvoicePDF(invoice, customer) {
 }
 
 // Email Invoice Function using Vercel Serverless Function
-async function sendInvoiceEmail(invoice, customer) {
+async function sendInvoiceEmail(invoice, customer, getToken) {
   try {
+    const { jsPDF, autoTable } = await loadPdfLibraries();
     // Generate PDF as base64
     const doc = new jsPDF();
     const brandColor = [99, 102, 241];
@@ -3411,7 +3346,7 @@ async function sendInvoiceEmail(invoice, customer) {
     const pdfBase64 = doc.output('datauristring').split(',')[1];
     
     // Get auth session for authentication
-    const token = await window.Clerk?.session?.getToken();
+    const token = await getToken();
     
     const res = await fetch('/api/send-invoice-email', {
       method: 'POST',
@@ -3419,12 +3354,12 @@ async function sendInvoiceEmail(invoice, customer) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ invoice, customer, pdfBase64 })
+      body: JSON.stringify({ invoiceId: invoice.id, pdfBase64 })
     });
     
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || 'Failed to send email');
+      throw new Error(errorData.error?.message || 'Failed to send email');
     }
     const data = await res.json();
 
@@ -3435,7 +3370,7 @@ async function sendInvoiceEmail(invoice, customer) {
   }
 }
 // Invoices Page Component
-function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onDeleteInvoice }) {
+function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onDeleteInvoice, onSendInvoice }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -3450,7 +3385,7 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
 
     setSendingEmail(invoice.id);
     try {
-      await sendInvoiceEmail(invoice, customer);
+      await onSendInvoice(invoice, customer);
       alert(`Invoice sent successfully to ${customer.email}!`);
     } catch (error) {
       alert(`Failed to send email: ${error.message}`);
@@ -3705,7 +3640,7 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              generateInvoicePDF(invoice, customer);
+                              void generateInvoicePDF(invoice, customer);
                             }}
                             className="p-2 hover:bg-blue-50 rounded-lg transition-colors text-blue-600"
                             title="Download PDF"

@@ -1,64 +1,65 @@
-import { getDb } from './db.js';
-import { verifyUser } from './auth.js';
+import { getDb } from '../server/db.js';
+import { getPagination, getRequiredId, HttpError, json, noContent, paginated, withApiRoute } from '../server/http.js';
+import { validateLead } from '../server/validation.js';
 
-export default async function handler(req, res) {
-  const userId = await verifyUser(req);
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  
-  const sql = getDb();
-  
-  try {
+export default withApiRoute({
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  async handler({ req, res, userId }) {
+    const sql = getDb();
+
     if (req.method === 'GET') {
-      const leads = await sql`SELECT * FROM leads WHERE user_id = ${userId} ORDER BY created_at DESC`;
-      return res.status(200).json(leads);
-    }
-    
-    if (req.method === 'POST') {
-      const { name, company, email, phone, source, stage, notes, reminders, quote_items } = req.body;
-      const result = await sql`
-        INSERT INTO leads (user_id, name, company, email, phone, source, stage, notes, reminders, quote_items)
-        VALUES (${userId}, ${name}, ${company || null}, ${email}, ${phone || null}, ${source || null}, ${stage || 'new'}, ${JSON.stringify(notes || [])}, ${JSON.stringify(reminders || [])}, ${JSON.stringify(quote_items || [])})
-        RETURNING *
+      const { limit, offset } = getPagination(req.query);
+      const rows = await sql`
+        SELECT id, name, company, email, phone, source, stage, notes, reminders, quote_items, created_at, updated_at
+        FROM leads
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${limit + 1} OFFSET ${offset}
       `;
-      return res.status(201).json(result[0]);
+      return json(res, 200, paginated(rows, limit, offset));
     }
+
+    if (req.method === 'POST') {
+      const lead = validateLead(req.body);
+      const rows = await sql`
+        INSERT INTO leads (user_id, name, company, email, phone, source, stage, notes, reminders, quote_items)
+        VALUES (
+          ${userId}, ${lead.name}, ${lead.company ?? null}, ${lead.email}, ${lead.phone ?? null},
+          ${lead.source ?? null}, ${lead.stage}, ${JSON.stringify(lead.notes ?? [])},
+          ${JSON.stringify(lead.reminders ?? [])}, ${JSON.stringify(lead.quote_items ?? [])}
+        )
+        RETURNING id, name, company, email, phone, source, stage, notes, reminders, quote_items, created_at, updated_at
+      `;
+      return json(res, 201, { data: rows[0] });
+    }
+
+    const id = getRequiredId(req.query);
 
     if (req.method === 'PUT') {
-      const id = req.query.id;
-      if (!id) return res.status(400).json({ error: 'Missing ID' });
-      
-      const { name, company, email, phone, source, stage, notes, reminders, quote_items } = req.body;
-      
-      // Basic approach: update all provided fields or keep existing if not provided in body (or handle full replace).
-      // Since fetch usually sends the full object, we update everything.
-      const result = await sql`
-        UPDATE leads 
-        SET 
-          name = COALESCE(${name}, name),
-          company = COALESCE(${company}, company),
-          email = COALESCE(${email}, email),
-          phone = COALESCE(${phone}, phone),
-          source = COALESCE(${source}, source),
-          stage = COALESCE(${stage}, stage),
-          notes = COALESCE(${notes ? JSON.stringify(notes) : null}, notes),
-          reminders = COALESCE(${reminders ? JSON.stringify(reminders) : null}, reminders),
-          quote_items = COALESCE(${quote_items ? JSON.stringify(quote_items) : null}, quote_items)
+      const lead = validateLead(req.body, { partial: true });
+      const has = key => Object.prototype.hasOwnProperty.call(lead, key);
+      const rows = await sql`
+        UPDATE leads
+        SET
+          name = CASE WHEN ${has('name')} THEN ${lead.name ?? null} ELSE name END,
+          company = CASE WHEN ${has('company')} THEN ${lead.company ?? null} ELSE company END,
+          email = CASE WHEN ${has('email')} THEN ${lead.email ?? null} ELSE email END,
+          phone = CASE WHEN ${has('phone')} THEN ${lead.phone ?? null} ELSE phone END,
+          source = CASE WHEN ${has('source')} THEN ${lead.source ?? null} ELSE source END,
+          stage = CASE WHEN ${has('stage')} THEN ${lead.stage ?? null} ELSE stage END,
+          notes = CASE WHEN ${has('notes')} THEN ${has('notes') ? JSON.stringify(lead.notes) : null}::jsonb ELSE notes END,
+          reminders = CASE WHEN ${has('reminders')} THEN ${has('reminders') ? JSON.stringify(lead.reminders) : null}::jsonb ELSE reminders END,
+          quote_items = CASE WHEN ${has('quote_items')} THEN ${has('quote_items') ? JSON.stringify(lead.quote_items) : null}::jsonb ELSE quote_items END,
+          updated_at = NOW()
         WHERE id = ${id} AND user_id = ${userId}
-        RETURNING *
+        RETURNING id, name, company, email, phone, source, stage, notes, reminders, quote_items, created_at, updated_at
       `;
-      return res.status(200).json(result[0]);
+      if (!rows[0]) throw new HttpError(404, 'not_found', 'Lead not found.');
+      return json(res, 200, { data: rows[0] });
     }
-    
-    if (req.method === 'DELETE') {
-      const id = req.query.id;
-      if (!id) return res.status(400).json({ error: 'Missing ID' });
-      await sql`DELETE FROM leads WHERE id = ${id} AND user_id = ${userId}`;
-      return res.status(204).end();
-    }
-    
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  } catch (error) {
-    console.error('API Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-}
+
+    const deleted = await sql`DELETE FROM leads WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
+    if (!deleted[0]) throw new HttpError(404, 'not_found', 'Lead not found.');
+    return noContent(res);
+  },
+});

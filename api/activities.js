@@ -1,32 +1,34 @@
-import { getDb } from './db.js';
-import { verifyUser } from './auth.js';
+import { getDb } from '../server/db.js';
+import { getPagination, HttpError, json, paginated, withApiRoute } from '../server/http.js';
+import { validateActivity } from '../server/validation.js';
 
-export default async function handler(req, res) {
-  const userId = await verifyUser(req);
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  
-  const sql = getDb();
-  
-  try {
+export default withApiRoute({
+  methods: ['GET', 'POST'],
+  async handler({ req, res, userId }) {
+    const sql = getDb();
+
     if (req.method === 'GET') {
-      const limit = req.query.limit ? parseInt(req.query.limit) : 50;
-      const activities = await sql`SELECT * FROM activities WHERE user_id = ${userId} ORDER BY timestamp DESC LIMIT ${limit}`;
-      return res.status(200).json(activities);
-    }
-    
-    if (req.method === 'POST') {
-      const { lead_id, type, message } = req.body;
-      const result = await sql`
-        INSERT INTO activities (user_id, lead_id, type, message)
-        VALUES (${userId}, ${lead_id || null}, ${type}, ${message})
-        RETURNING *
+      const { limit, offset } = getPagination(req.query);
+      const rows = await sql`
+        SELECT id, lead_id, type, message, timestamp
+        FROM activities
+        WHERE user_id = ${userId}
+        ORDER BY timestamp DESC, id DESC
+        LIMIT ${limit + 1} OFFSET ${offset}
       `;
-      return res.status(201).json(result[0]);
+      return json(res, 200, paginated(rows, limit, offset));
     }
-    
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  } catch (error) {
-    console.error('API Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-}
+
+    const activity = validateActivity(req.body);
+    if (activity.lead_id) {
+      const lead = await sql`SELECT id FROM leads WHERE id = ${activity.lead_id} AND user_id = ${userId}`;
+      if (!lead[0]) throw new HttpError(400, 'invalid_reference', 'Lead does not exist.');
+    }
+    const rows = await sql`
+      INSERT INTO activities (user_id, lead_id, type, message)
+      VALUES (${userId}, ${activity.lead_id}, ${activity.type}, ${activity.message})
+      RETURNING id, lead_id, type, message, timestamp
+    `;
+    return json(res, 201, { data: rows[0] });
+  },
+});
