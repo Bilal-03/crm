@@ -192,32 +192,3 @@ The project is configured for Vercel deployment.
 7. Deploy and verify sign-in, one CRUD flow per resource, tenant isolation, PDF generation, and invoice delivery.
 
 Every push to the configured production branch can trigger a new deployment. Vercel also creates preview deployments for non-production branches when enabled.
-
-## Security posture
-
-- Clerk tokens are verified server-side.
-- User identity is derived from the authenticated session.
-- Queries are tenant-scoped and use parameterized SQL.
-- Cross-entity ownership is checked before writes.
-- Invoice totals and balances are calculated server-side.
-- CSV exports neutralize spreadsheet formulas.
-- API responses include defensive security headers through `vercel.json`.
-- Secrets and local environment files are excluded by `.gitignore`.
-- Database and server errors are normalized before reaching the browser.
-
-Before increasing traffic, add durable rate limiting for expensive operations and configure database backups, point-in-time recovery, monitoring, and alerting.
-
-## Operational checklist
-
-- [ ] Production Clerk keys are configured.
-- [ ] Production origin is listed exactly in `CLERK_AUTHORIZED_PARTIES`.
-- [ ] Database schema or migration has been applied.
-- [ ] Neon backups or point-in-time recovery are enabled.
-- [ ] Resend sender identity is verified if invoice email is used.
-- [ ] Vercel environment variables are configured for the correct environments.
-- [ ] Sign-in, CRUD, tenant isolation, invoice PDF, and email delivery have been smoke-tested.
-- [ ] Monitoring and deployment notifications are enabled.
-
-## License
-
-No license has been declared yet. Add a `LICENSE` file before distributing this project outside its owning organization.
