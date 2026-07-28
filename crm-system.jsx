@@ -333,6 +333,7 @@ export default function CRMApp() {
   const [pipelineView, setPipelineView] = useState('kanban'); 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStage, setFilterStage] = useState('all');
+  const [dataLoadErrors, setDataLoadErrors] = useState([]);
 
   // 1. Auth & Initial Data Load
   useEffect(() => {
@@ -367,13 +368,28 @@ export default function CRMApp() {
   const fetchData = async (userId) => {
     setLoading(true);
     try {
-      const [leadsRes, meetingsRes, activitiesRes, invoiceRows, customerRows] = await Promise.all([
+      const resources = ['leads', 'meetings', 'activities', 'invoices', 'customers'];
+      const results = await Promise.allSettled([
         fetchApi('/leads'),
         fetchApi('/meetings'),
         fetchApi('/activities?limit=50'),
         fetchApi('/invoices'),
         fetchApi('/customers'),
       ]);
+      const failures = results
+        .map((result, index) => result.status === 'rejected'
+          ? { resource: resources[index], message: result.reason?.message || 'Request failed' }
+          : null)
+        .filter(Boolean);
+      setDataLoadErrors(failures);
+      failures.forEach(failure => console.error(`Error fetching ${failure.resource}:`, failure.message));
+
+      const [leadsResult, meetingsResult, activitiesResult, invoicesResult, customersResult] = results;
+      const leadsRes = leadsResult.status === 'fulfilled' ? leadsResult.value : null;
+      const meetingsRes = meetingsResult.status === 'fulfilled' ? meetingsResult.value : null;
+      const activitiesRes = activitiesResult.status === 'fulfilled' ? activitiesResult.value : null;
+      const invoiceRows = invoicesResult.status === 'fulfilled' ? invoicesResult.value : null;
+      const customerRows = customersResult.status === 'fulfilled' ? customersResult.value : null;
 
       if (leadsRes) {
         const mappedLeads = leadsRes.map(l => ({
@@ -394,9 +410,9 @@ export default function CRMApp() {
         setMeetings(mappedMeetings);
       }
 
-      setActivities(activitiesRes || []);
-      setInvoices(invoiceRows || []);
-      setCustomerRecords(customerRows || []);
+      if (activitiesRes) setActivities(activitiesRes);
+      if (invoiceRows) setInvoices(invoiceRows);
+      if (customerRows) setCustomerRecords(customerRows);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -819,6 +835,17 @@ export default function CRMApp() {
 
         {/* Page Content */}
         <main className="flex-1 overflow-y-auto p-8">
+          {dataLoadErrors.length > 0 && (
+            <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+              <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+              <div>
+                <p className="font-semibold">Some CRM data could not be loaded.</p>
+                <p className="mt-1 text-sm">
+                  Failed sections: {dataLoadErrors.map(error => error.resource).join(', ')}. Reload once; if it continues, check the matching Vercel function log.
+                </p>
+              </div>
+            </div>
+          )}
           <AnimatePresence mode="wait">
             {currentPage === 'dashboard' && (
               <Dashboard 
