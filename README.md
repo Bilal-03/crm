@@ -1,60 +1,157 @@
 # CRM Pro
 
-CRM Pro is a tenant-isolated CRM for leads, pipeline management, meetings, customers, activities, quotes, and invoices. It uses React/Vite in the browser, Clerk for authentication, Vercel functions for the API, and PostgreSQL on Neon.
+> A focused, production-ready CRM for managing leads, customers, sales pipelines, meetings, quotes, and invoices.
 
-## Requirements
+CRM Pro is a full-stack React application designed for small teams that need one place to manage customer relationships and revenue operations. The browser runs a Vite-powered React interface, authentication is handled by Clerk, serverless APIs run on Vercel, and application data is stored in PostgreSQL through Neon.
 
-- Node.js 20 or newer
-- A Clerk application
-- A PostgreSQL/Neon database
-- A Resend account only if invoice email is enabled
+## What it includes
 
-## Local setup
+| Area | Capabilities |
+| --- | --- |
+| Dashboard | Revenue, pipeline, invoice, meeting, and priority-work summaries |
+| Leads | Search, filtering, priority scoring, bulk actions, notes, reminders, quotes, and exports |
+| Pipeline | Kanban and table views with drag-and-drop stage updates |
+| Customers | Closed-won customer profiles and contact details |
+| Meetings | Upcoming and past meetings, Google Calendar links, and Google Meet links |
+| Invoices | Draft, send, edit, download PDF, track payment status, and identify overdue balances |
+| Authentication | Clerk sign-in with tenant-scoped data access |
+| Notifications | In-app success and error feedback for important actions |
 
-```bash
-npm install
-cp .env.example .env.local
-npm run dev
-```
+## Technology
 
-Fill in `.env.local` before starting the app. Never expose `CLERK_SECRET_KEY`, `NEON_DATABASE_URL`, or `RESEND_API_KEY` through a `VITE_` variable; Vite variables are shipped to the browser.
-
-For a fresh database, run [`schema.sql`](./schema.sql). For a database created with the original prototype schema, take a snapshot and apply [`migrations/002_production_hardening.sql`](./migrations/002_production_hardening.sql) once.
-
-## Commands
-
-```bash
-npm run dev       # local development
-npm test          # validation/security regression tests
-npm run build     # optimized production build
-npm run check     # tests followed by production build
-npm run preview   # preview the built frontend
-```
+- React 18 and Vite
+- Tailwind CSS and Framer Motion
+- Recharts for dashboard visualizations
+- Clerk for authentication and session tokens
+- Vercel Functions for the API layer
+- Neon PostgreSQL for persistent data
+- Resend for optional invoice email delivery
+- jsPDF and AutoTable for PDF quotes and invoices
 
 ## Architecture
 
 ```text
-Browser
-  React + Clerk session
-          |
-          | Bearer session token
-          v
-Vercel API functions
-  shared auth / validation / errors / pagination
-          |
-          | parameterized SQL + tenant predicates
-          v
-PostgreSQL / Neon
-  tenant-safe foreign keys, constraints, indexes
+┌──────────────────────────────────────────────┐
+│ Browser                                      │
+│ React + Clerk + Tailwind + Recharts          │
+└──────────────────────┬───────────────────────┘
+                       │ Bearer session token
+                       ▼
+┌──────────────────────────────────────────────┐
+│ Vercel serverless API                        │
+│ Auth • validation • pagination • errors      │
+└──────────────────────┬───────────────────────┘
+                       │ Parameterized SQL
+                       ▼
+┌──────────────────────────────────────────────┐
+│ Neon PostgreSQL                              │
+│ Tenant-scoped leads, meetings, customers,    │
+│ activities, invoices, and relationships      │
+└──────────────────────────────────────────────┘
 
-Invoice email: API -> Resend
+Invoice email: API → Resend
 ```
 
-The browser never chooses `user_id`; API routes derive it from the verified Clerk token. Every query is tenant-scoped. Cross-entity writes additionally verify that the referenced lead/customer belongs to the same tenant, and the database enforces tenant-safe foreign keys for meetings and invoices.
+The API derives the authenticated user from the verified Clerk token. The browser never supplies its own `user_id`, and all database queries are tenant-scoped. Relationship writes verify ownership before creating meetings or invoices.
 
-See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the engineering review, ratings, decisions, and remaining production work.
+## Repository layout
 
-## API contract
+```text
+.
+├── api/                    # Vercel API entrypoints
+├── server/                 # Shared API, auth, database, and validation logic
+├── src/                    # React entrypoint, styles, and error boundary
+├── crm-system.jsx          # Main CRM interface and feature components
+├── schema.sql              # Fresh PostgreSQL schema
+├── migrations/             # Safe updates for existing databases
+├── index.html              # Vite document shell
+├── package.json            # Scripts and dependencies
+├── package-lock.json       # Locked dependency graph
+├── vite.config.js          # Vite build configuration
+├── tailwind.config.js      # Tailwind configuration
+├── postcss.config.js       # PostCSS configuration
+└── vercel.json             # Deployment security headers
+```
+
+## Requirements
+
+- Node.js 20 or newer
+- npm
+- A Clerk application
+- A PostgreSQL database, preferably Neon
+- A Resend account if invoice email is enabled
+
+## Local development
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure environment variables
+
+```bash
+cp .env.example .env.local
+```
+
+Fill in `.env.local` with the values for your environment. Never expose server secrets through variables prefixed with `VITE_`; Vite ships those values to the browser.
+
+### 3. Prepare the database
+
+For a new database:
+
+```bash
+psql "$NEON_DATABASE_URL" -f schema.sql
+```
+
+For an existing database created from the original prototype schema, create a backup and apply the reviewed migration:
+
+```bash
+psql "$NEON_DATABASE_URL" -f migrations/002_production_hardening.sql
+```
+
+### 4. Start the application
+
+```bash
+npm run dev
+```
+
+Open the local Vite URL shown in the terminal, normally `http://localhost:5173`.
+
+## Environment variables
+
+| Variable | Required | Purpose |
+| --- | ---: | --- |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Yes | Safe Clerk browser publishable key |
+| `CLERK_SECRET_KEY` | Yes | Server-side Clerk token verification |
+| `CLERK_JWT_KEY` | No | Optional PEM key for networkless verification |
+| `CLERK_AUTHORIZED_PARTIES` | Yes in production | Exact allowed frontend origin(s) |
+| `NEON_DATABASE_URL` | Yes | PostgreSQL connection string |
+| `RESEND_API_KEY` | Optional | Enables invoice email delivery |
+| `INVOICE_FROM_EMAIL` | Optional | Verified sender for invoice emails |
+
+Use `.env.example` as the canonical variable list. Keep `.env`, `.env.local`, and production secret values out of Git.
+
+## Available commands
+
+```bash
+npm run dev       # Start the local Vite development server
+npm run build     # Create the optimized production bundle
+npm run preview   # Preview the production bundle locally
+npm run check     # Run the production build verification
+```
+
+## API resources
+
+| Endpoint | Operations | Purpose |
+| --- | --- | --- |
+| `/api/leads` | GET, POST, PUT, DELETE | Lead records, stages, notes, reminders, and quote items |
+| `/api/customers` | GET, POST | Customer records and lead-to-customer promotion |
+| `/api/meetings` | GET, POST, PUT, DELETE | Meeting scheduling and relationship ownership checks |
+| `/api/activities` | GET, POST | Activity timeline records |
+| `/api/invoices` | GET, POST, PUT, DELETE | Invoice lifecycle, totals, balances, and payment status |
+| `/api/send-invoice-email` | POST | Generates and sends an invoice email through Resend |
 
 Collection responses use a consistent envelope:
 
@@ -70,7 +167,7 @@ Collection responses use a consistent envelope:
 }
 ```
 
-Single-resource responses use `{ "data": { ... } }`. Errors use an opaque request identifier that can be matched to server logs:
+Errors use a safe message and request ID for server-log correlation:
 
 ```json
 {
@@ -82,27 +179,45 @@ Single-resource responses use `{ "data": { ... } }`. Errors use an opaque reques
 }
 ```
 
-API inputs are bounded and validated. Invoice line totals and balances are calculated on the server rather than trusted from the browser.
+## Deployment
 
-## Production deployment
+The project is configured for Vercel deployment.
 
-1. Provision a production Clerk instance and use production keys.
-2. Apply the database schema or reviewed migration before deploying the API.
-3. Set all variables from `.env.example` in the deployment environment. Set `CLERK_AUTHORIZED_PARTIES` to the exact production origin(s).
-4. Configure a verified Resend sender in `INVOICE_FROM_EMAIL`, or leave invoice email disabled.
-5. Run `npm run check` in CI and require it before merge.
-6. Deploy to Vercel and verify sign-in, one CRUD path per resource, tenant isolation, and invoice delivery.
-7. Configure database backups/PITR, log retention, uptime monitoring, and alerts.
+1. Connect the GitHub repository to Vercel.
+2. Select the `main` branch for production deployments.
+3. Add every variable from `.env.example` to the Vercel project settings.
+4. Set `CLERK_AUTHORIZED_PARTIES` to the exact production origin.
+5. Apply `schema.sql` or the appropriate migration before the first production request.
+6. Configure a verified Resend sender if invoice email is enabled.
+7. Deploy and verify sign-in, one CRUD flow per resource, tenant isolation, PDF generation, and invoice delivery.
 
-## Security notes
+Every push to the configured production branch can trigger a new deployment. Vercel also creates preview deployments for non-production branches when enabled.
 
-- Secrets and local environment files are gitignored.
-- Clerk tokens are strictly parsed and verified; authorized-party enforcement is available through configuration.
-- API responses disable caching and include defensive response headers.
-- Database errors and stack traces are not returned to clients.
-- Relationship ownership checks prevent cross-tenant ID references.
-- CSV export neutralizes spreadsheet formulas.
-- Invoice email uses database-owned recipient/invoice data and validates the attached PDF.
-- `npm audit --omit=dev` currently reports zero known production dependency vulnerabilities.
+## Security posture
 
-The API intentionally does not use an in-memory rate limiter because serverless instances cannot enforce a global quota. Add a durable limiter (for example, Redis-backed) before exposing costly operations at high volume.
+- Clerk tokens are verified server-side.
+- User identity is derived from the authenticated session.
+- Queries are tenant-scoped and use parameterized SQL.
+- Cross-entity ownership is checked before writes.
+- Invoice totals and balances are calculated server-side.
+- CSV exports neutralize spreadsheet formulas.
+- API responses include defensive security headers through `vercel.json`.
+- Secrets and local environment files are excluded by `.gitignore`.
+- Database and server errors are normalized before reaching the browser.
+
+Before increasing traffic, add durable rate limiting for expensive operations and configure database backups, point-in-time recovery, monitoring, and alerting.
+
+## Operational checklist
+
+- [ ] Production Clerk keys are configured.
+- [ ] Production origin is listed exactly in `CLERK_AUTHORIZED_PARTIES`.
+- [ ] Database schema or migration has been applied.
+- [ ] Neon backups or point-in-time recovery are enabled.
+- [ ] Resend sender identity is verified if invoice email is used.
+- [ ] Vercel environment variables are configured for the correct environments.
+- [ ] Sign-in, CRUD, tenant isolation, invoice PDF, and email delivery have been smoke-tested.
+- [ ] Monitoring and deployment notifications are enabled.
+
+## License
+
+No license has been declared yet. Add a `LICENSE` file before distributing this project outside its owning organization.

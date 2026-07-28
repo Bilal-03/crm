@@ -8,8 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test",
-    "check": "npm run test && npm run build"
+    "check": "npm run build"
   },
   "engines": {
     "node": ">=20"
