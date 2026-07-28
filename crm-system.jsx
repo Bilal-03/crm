@@ -124,6 +124,65 @@ const getScoreConfig = (score) => {
   return { label: 'Cold', color: 'text-blue-500', bg: 'bg-blue-50', icon: Snowflake };
 };
 
+const useModalBehavior = (onClose) => {
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+};
+
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = useState(() => (
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023px)').matches : false
+  ));
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 1023px)');
+    const handleChange = () => setIsMobile(mediaQuery.matches);
+    handleChange();
+    mediaQuery.addEventListener?.('change', handleChange);
+    return () => mediaQuery.removeEventListener?.('change', handleChange);
+  }, []);
+
+  return isMobile;
+};
+
+function Toast({ toast, onDismiss }) {
+  if (!toast) return null;
+
+  const tone = toast.type === 'error'
+    ? 'border-red-200 bg-red-50 text-red-800'
+    : 'border-green-200 bg-green-50 text-green-800';
+  const Icon = toast.type === 'error' ? AlertCircle : CheckCircle2;
+
+  return (
+    <div className="fixed right-4 top-4 z-[70] w-[min(22rem,calc(100vw-2rem))]" role="status" aria-live="polite">
+      <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 shadow-lg ${tone}`}>
+        <Icon className="mt-0.5 h-5 w-5 flex-shrink-0" aria-hidden="true" />
+        <p className="flex-1 text-sm font-medium">{toast.message}</p>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="rounded-md p-1 hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-current"
+          aria-label="Dismiss notification"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // 1. Google Calendar Link Generator
 const generateCalendarUrl = (lead) => {
   const title = encodeURIComponent(`Meeting with ${lead.name}`);
@@ -315,6 +374,7 @@ export default function CRMApp() {
 
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isMobile = useIsMobile();
   
   // Data states
   const [leads, setLeads] = useState([]);
@@ -334,6 +394,17 @@ export default function CRMApp() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStage, setFilterStage] = useState('all');
   const [dataLoadErrors, setDataLoadErrors] = useState([]);
+  const [toast, setToast] = useState(null);
+
+  const notify = (message, type = 'success') => {
+    setToast({ message, type });
+  };
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   // 1. Auth & Initial Data Load
   useEffect(() => {
@@ -415,6 +486,7 @@ export default function CRMApp() {
       if (customerRows) setCustomerRecords(customerRows);
     } catch (error) {
       console.error('Error fetching data:', error);
+      notify('We could not load your CRM data. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -506,7 +578,7 @@ export default function CRMApp() {
 
     if (error) {
       console.error('Error adding lead:', error);
-      alert(error.message || 'Failed to add lead.');
+      notify(error.message || 'Failed to add lead.', 'error');
       return;
     }
 
@@ -518,6 +590,7 @@ export default function CRMApp() {
       };
       setLeads(prev => [newLead, ...prev]);
       addActivity('lead_created', `New lead added: ${leadData.name}`);
+      notify('Lead created successfully.');
     }
   };
 
@@ -532,6 +605,7 @@ export default function CRMApp() {
 
     if (error) {
       console.error('Error updating lead:', error);
+      notify(error.message || 'Failed to update lead.', 'error');
       return;
     }
 
@@ -540,6 +614,7 @@ export default function CRMApp() {
         lead.id === leadId ? { ...lead, ...updates, quoteItems: data.quote_items } : lead
       ));
       addActivity('lead_updated', `Lead updated`, leadId);
+      notify('Lead updated successfully.');
     }
   };
 
@@ -552,9 +627,36 @@ export default function CRMApp() {
     if (error) {
       console.error('Error deleting lead:', error);
       setLeads(previousLeads);
-      alert(error.message || 'Failed to delete lead.');
+      notify(error.message || 'Failed to delete lead.', 'error');
     } else {
       addActivity('lead_deleted', 'Lead deleted');
+      notify('Lead deleted.');
+    }
+  };
+
+  const bulkUpdateLeads = async (leadIds, stage) => {
+    try {
+      await Promise.all(leadIds.map(leadId => fetchApi(`/leads?id=${leadId}`, { method: 'PUT', body: { stage } })));
+      setLeads(prev => prev.map(lead => leadIds.includes(lead.id) ? { ...lead, stage } : lead));
+      addActivity('leads_bulk_updated', `${leadIds.length} leads moved to ${PIPELINE_STAGES.find(item => item.id === stage)?.label || stage}`);
+      notify(`${leadIds.length} lead${leadIds.length === 1 ? '' : 's'} updated.`);
+    } catch (error) {
+      console.error('Error updating leads in bulk:', error);
+      notify(error.message || 'Some leads could not be updated.', 'error');
+    }
+  };
+
+  const bulkDeleteLeads = async (leadIds) => {
+    const previousLeads = leads;
+    setLeads(prev => prev.filter(lead => !leadIds.includes(lead.id)));
+    try {
+      await Promise.all(leadIds.map(leadId => fetchApi(`/leads?id=${leadId}`, { method: 'DELETE' })));
+      addActivity('leads_bulk_deleted', `${leadIds.length} leads deleted`);
+      notify(`${leadIds.length} lead${leadIds.length === 1 ? '' : 's'} deleted.`);
+    } catch (error) {
+      console.error('Error deleting leads in bulk:', error);
+      setLeads(previousLeads);
+      notify(error.message || 'Some leads could not be deleted.', 'error');
     }
   };
 
@@ -616,6 +718,7 @@ export default function CRMApp() {
 
     if (error) {
       console.error('Error adding meeting:', error);
+      notify(error.message || 'Failed to schedule meeting.', 'error');
       return;
     }
 
@@ -628,6 +731,7 @@ export default function CRMApp() {
       };
       setMeetings(prev => [newMeeting, ...prev]);
       addActivity('meeting_scheduled', `Meeting scheduled: ${meetingData.title}`, meetingData.leadId);
+      notify('Meeting scheduled successfully.');
     }
   };
 
@@ -642,6 +746,7 @@ export default function CRMApp() {
     
     if (error) {
       console.error('Error updating meeting:', error);
+      notify(error.message || 'Failed to update meeting.', 'error');
     } else {
       setMeetings(prev => prev.map(meeting =>
         meeting.id === meetingId ? {
@@ -652,14 +757,20 @@ export default function CRMApp() {
         } : meeting
       ));
       addActivity('meeting_updated', `Meeting updated`, updates.leadId);
+      notify('Meeting updated successfully.');
     }
   };
 
   const deleteMeeting = async (meetingId) => {
     setMeetings(prev => prev.filter(m => m.id !== meetingId));
     let error = null; try { await fetchApi(`/meetings?id=${ meetingId }`, { method: 'DELETE' }); } catch (e) { error = e; }
-    if (error) console.error('Error deleting meeting:', error);
-    else addActivity('meeting_deleted', `Meeting deleted`);
+    if (error) {
+      console.error('Error deleting meeting:', error);
+      notify(error.message || 'Failed to delete meeting.', 'error');
+    } else {
+      addActivity('meeting_deleted', `Meeting deleted`);
+      notify('Meeting deleted.');
+    }
   };
 
   // Invoice Operations
@@ -683,7 +794,7 @@ export default function CRMApp() {
 
       if (error) {
         console.error('Error creating invoice:', error);
-        alert(`Failed to create invoice: ${error.message || 'Unknown error'}`);
+        notify(`Failed to create invoice: ${error.message || 'Unknown error'}`, 'error');
         return;
       }
 
@@ -692,11 +803,11 @@ export default function CRMApp() {
         setShowInvoiceModal(false);
         setSelectedInvoice(null);
         addActivity('invoice_created', `Invoice ${data.invoice_number} created`);
-        alert('Invoice created successfully!');
+        notify('Invoice created successfully.');
       }
     } catch (err) {
       console.error('Exception creating invoice:', err);
-      alert(`Failed to create invoice: ${err.message}`);
+      notify(`Failed to create invoice: ${err.message}`, 'error');
     }
   };
 
@@ -711,7 +822,7 @@ export default function CRMApp() {
 
     if (error) {
       console.error('Error updating invoice:', error);
-      alert('Failed to update invoice');
+      notify('Failed to update invoice.', 'error');
       return;
     }
 
@@ -720,6 +831,7 @@ export default function CRMApp() {
       setShowInvoiceModal(false);
       setSelectedInvoice(null);
       addActivity('invoice_updated', `Invoice ${data.invoice_number} updated`);
+      notify('Invoice updated successfully.');
     }
   };
 
@@ -734,12 +846,13 @@ export default function CRMApp() {
 
     if (error) {
       console.error('Error deleting invoice:', error);
-      alert('Failed to delete invoice');
+      notify('Failed to delete invoice.', 'error');
       return;
     }
 
     setInvoices(prev => prev.filter(inv => inv.id !== invoiceId));
     addActivity('invoice_deleted', `Invoice ${invoice?.invoice_number} deleted`);
+    notify('Invoice deleted.');
   };
 
   // Drag and drop handler
@@ -762,7 +875,10 @@ export default function CRMApp() {
         addActivity('stage_changed', `${lead?.name} moved to ${PIPELINE_STAGES.find(s => s.id === destination.droppableId)?.label}`, draggableId);
       } catch (error) {
         setLeads(prev => prev.map(item => item.id === draggableId ? lead : item));
-        alert(error.message || 'Failed to move lead.');
+        notify(error.message || 'Failed to move lead.', 'error');
+      }
+      if (!lead) {
+        notify('That lead is no longer available.', 'error');
       }
     }
   };
@@ -799,8 +915,14 @@ export default function CRMApp() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#6366F1]"></div>
+      <div className="min-h-screen bg-gray-50 p-6 md:p-8" aria-busy="true" aria-label="Loading CRM">
+        <div className="mx-auto max-w-7xl space-y-6 animate-pulse">
+          <div className="h-10 w-56 rounded-lg bg-gray-200" />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            {[1, 2, 3, 4].map(item => <div key={item} className="h-32 rounded-2xl bg-white shadow-sm" />)}
+          </div>
+          <div className="h-72 rounded-2xl bg-white shadow-sm" />
+        </div>
       </div>
     );
   }
@@ -818,11 +940,23 @@ export default function CRMApp() {
       {/* Sidebar */}
       <Sidebar 
         open={sidebarOpen}
+        mobile={isMobile}
         currentPage={currentPage}
-        onNavigate={setCurrentPage}
+        onNavigate={(page) => {
+          setCurrentPage(page);
+          if (isMobile) setSidebarOpen(false);
+        }}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         onSignOut={signOut}
       />
+      {isMobile && sidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-30 bg-gray-950/40 lg:hidden"
+        />
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -834,15 +968,22 @@ export default function CRMApp() {
         />
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
           {dataLoadErrors.length > 0 && (
             <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
               <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
               <div>
                 <p className="font-semibold">Some CRM data could not be loaded.</p>
                 <p className="mt-1 text-sm">
-                  Failed sections: {dataLoadErrors.map(error => error.resource).join(', ')}. Reload once; if it continues, check the matching Vercel function log.
+                  Failed sections: {dataLoadErrors.map(error => error.resource).join(', ')}. You can retry now or check the matching Vercel function log if the issue continues.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => user && fetchData(user.id)}
+                  className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  Retry loading
+                </button>
               </div>
             </div>
           )}
@@ -872,7 +1013,10 @@ export default function CRMApp() {
                   setSelectedLead(lead);
                   setShowLeadModal(true);
                 }}
+                onViewLead={(lead) => setSelectedLead(lead)}
                 onDeleteLead={deleteLead}
+                onBulkUpdateStage={bulkUpdateLeads}
+                onBulkDelete={bulkDeleteLeads}
                 onExport={() => exportToCSV(filteredLeads, 'leads.csv')}
               />
             )}
@@ -881,8 +1025,7 @@ export default function CRMApp() {
               <ClientsPage 
                 clients={clients}
                 onViewClient={(lead) => {
-                  setSelectedLead(lead);
-                  setShowLeadModal(true);
+                  setSelectedLead({ ...lead, __profileType: 'client' });
                 }}
               />
             )}
@@ -932,6 +1075,7 @@ export default function CRMApp() {
                 }}
                 onDeleteInvoice={deleteInvoice}
                 onSendInvoice={(invoice, customer) => sendInvoiceEmail(invoice, customer, getToken)}
+                onNotify={notify}
               />
             )}
           </AnimatePresence>
@@ -957,6 +1101,15 @@ export default function CRMApp() {
           }}
           onAddNote={addNote}
           onAddReminder={addReminder}
+        />
+      )}
+
+      {selectedLead && !showLeadModal && (
+        <LeadDetailDrawer
+          lead={selectedLead}
+          activities={activities}
+          onClose={() => setSelectedLead(null)}
+          onEdit={() => setShowLeadModal(true)}
         />
       )}
 
@@ -997,13 +1150,15 @@ export default function CRMApp() {
           }}
         />
       )}
+
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }
 
 
 // Sidebar Component
-function Sidebar({ open, currentPage, onNavigate, onSignOut }) {
+function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
   const menuItems = [
     { id: 'dashboard', icon: Home, label: 'Dashboard' },
     { id: 'leads', icon: Users, label: 'Leads' },
@@ -1016,8 +1171,8 @@ function Sidebar({ open, currentPage, onNavigate, onSignOut }) {
   return (
     <motion.aside
       initial={false}
-      animate={{ width: open ? 280 : 80 }}
-      className="bg-white border-r border-gray-200 flex flex-col relative z-10"
+      animate={{ width: open ? 280 : 80, x: mobile && !open ? -300 : 0 }}
+      className="fixed inset-y-0 left-0 z-40 flex flex-col border-r border-gray-200 bg-white shadow-xl lg:relative lg:z-10 lg:shadow-none"
     >
       <div className="p-6 border-b border-gray-200">
         <motion.div 
@@ -1046,6 +1201,9 @@ function Sidebar({ open, currentPage, onNavigate, onSignOut }) {
           <button
             key={item.id}
             onClick={() => onNavigate(item.id)}
+            aria-current={currentPage === item.id ? 'page' : undefined}
+            aria-label={open ? undefined : item.label}
+            title={open ? undefined : item.label}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${
               currentPage === item.id
                 ? 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white shadow-lg shadow-[#6366F1]/30'
@@ -1062,7 +1220,9 @@ function Sidebar({ open, currentPage, onNavigate, onSignOut }) {
 
       <div className="p-4 border-t border-gray-200">
         <button
-          onClick={() => signOut()}
+          onClick={onSignOut}
+          aria-label={open ? undefined : 'Sign out'}
+          title={open ? undefined : 'Sign out'}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all"
         >
           <LogOut className="w-5 h-5 flex-shrink-0" />
@@ -1076,10 +1236,13 @@ function Sidebar({ open, currentPage, onNavigate, onSignOut }) {
 // Header Component  
 function Header({ user, onToggleSidebar, overdueCount }) {
   return (
-    <header className="bg-white/50 backdrop-blur-xl border-b border-gray-200 px-8 py-4">
+    <header className="bg-white/50 backdrop-blur-xl border-b border-gray-200 px-4 py-3 md:px-8 md:py-4">
       <div className="flex items-center justify-between">
         <button
           onClick={onToggleSidebar}
+          type="button"
+          aria-label="Toggle navigation sidebar"
+          title="Toggle navigation sidebar"
           className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
         >
           <Menu className="w-6 h-6 text-gray-700" />
@@ -1112,9 +1275,27 @@ function Header({ user, onToggleSidebar, overdueCount }) {
   );
 }
 
-// Dashboard Component
+function PriorityAction({ icon: Icon, label, value, tone, onClick }) {
+  const tones = {
+    red: 'bg-red-50 text-red-700 border-red-100',
+    orange: 'bg-orange-50 text-orange-700 border-orange-100',
+    blue: 'bg-blue-50 text-blue-700 border-blue-100'
+  };
+
+  return (
+    <button type="button" onClick={onClick} className={`flex items-center justify-between rounded-xl border p-4 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${tones[tone]}`}>
+      <span className="flex items-center gap-3">
+        <Icon className="h-5 w-5" aria-hidden="true" />
+        <span className="text-sm font-semibold">{label}</span>
+      </span>
+      <span className="text-xl font-bold">{value}</span>
+    </button>
+  );
+}
+
 // Dashboard Component
 function Dashboard({ stats, activities, meetings, leads, invoices = [], customers = [], onNavigate, onAddLead }) {
+  const [trendRange, setTrendRange] = useState('7');
   // Prepare Data for Charts
   const pipelineData = PIPELINE_STAGES.map(stage => ({
     name: stage.label,
@@ -1161,10 +1342,11 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
       .reduce((sum, i) => sum + parseFloat(i.total_amount || 0), 0),
   };
 
-  // Revenue Trend (Last 7 days)
-  const revenueTrendData = [...Array(7)].map((_, i) => {
+  // Revenue Trend
+  const trendDays = Number(trendRange);
+  const revenueTrendData = [...Array(trendDays)].map((_, i) => {
     const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
+    d.setDate(d.getDate() - (trendDays - 1 - i));
     const dateStr = d.toISOString().split('T')[0];
     
     const dayRevenue = invoices
@@ -1204,20 +1386,13 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
     )
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  // Calculate conversion rate
-  const conversionRate = stats.totalLeads > 0 
-    ? ((stats.closedWon / stats.totalLeads) * 100).toFixed(1) 
-    : 0;
-
   // Calculate pipeline value
   const pipelineValue = leads
     .filter(l => ['qualified', 'proposal'].includes(l.stage))
     .length * 5000;
 
-  // Calculate average deal size
-  const avgDealSize = invoiceStats.paid > 0
-    ? (invoiceStats.totalRevenue / invoiceStats.paid)
-    : 5000;
+  const todayMeetings = upcomingMeetings.filter(meeting => new Date(meeting.dateTime).toDateString() === new Date().toDateString());
+  const priorityCount = overdueInvoices.length + overdueReminders.length + todayMeetings.length;
 
   return (
     <motion.div
@@ -1269,24 +1444,27 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
           </button>
         </div>
 
-        {/* Quick Stats in Hero */}
-        <div className="grid grid-cols-3 gap-4 mt-6 relative z-10">
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-            <div className="text-white/70 text-sm mb-1">This Month Revenue</div>
-            <div className="text-2xl font-bold">${(invoiceStats.thisMonthRevenue / 1000).toFixed(1)}K</div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-            <div className="text-white/70 text-sm mb-1">Conversion Rate</div>
-            <div className="text-2xl font-bold">{conversionRate}%</div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-            <div className="text-white/70 text-sm mb-1">Avg. Deal Size</div>
-            <div className="text-2xl font-bold">${(avgDealSize / 1000).toFixed(1)}K</div>
-          </div>
-        </div>
       </div>
 
-      {/* Financial Metrics - New Section */}
+      {/* Priority work */}
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm" aria-labelledby="priority-work-title">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="priority-work-title" className="text-lg font-bold text-gray-900">Priority work</h2>
+            <p className="mt-1 text-sm text-gray-500">The items most likely to need your attention today.</p>
+          </div>
+          <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${priorityCount ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+            {priorityCount ? `${priorityCount} item${priorityCount === 1 ? '' : 's'} to review` : 'All clear'}
+          </span>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <PriorityAction icon={AlertCircle} label="Overdue invoices" value={overdueInvoices.length} tone="red" onClick={() => onNavigate('invoices')} />
+          <PriorityAction icon={Clock} label="Overdue reminders" value={overdueReminders.length} tone="orange" onClick={() => onNavigate('pipeline')} />
+          <PriorityAction icon={Calendar} label="Meetings today" value={todayMeetings.length} tone="blue" onClick={() => onNavigate('meetings')} />
+        </div>
+      </section>
+
+      {/* Financial Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* Total Revenue */}
         <motion.div
@@ -1391,10 +1569,22 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="text-lg font-bold text-gray-900">Revenue & Leads Trend</h3>
-              <p className="text-sm text-gray-500">Last 7 days performance</p>
+              <p className="text-sm text-gray-500">Revenue collected and new leads</p>
             </div>
-            <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-blue-600" />
+            <div className="flex items-center gap-3">
+              <select
+                aria-label="Trend time range"
+                value={trendRange}
+                onChange={(event) => setTrendRange(event.target.value)}
+                className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-medium text-gray-700 focus:ring-2 focus:ring-[#6366F1]"
+              >
+                <option value="7">7 days</option>
+                <option value="30">30 days</option>
+                <option value="90">90 days</option>
+              </select>
+              <div className="hidden h-10 w-10 items-center justify-center rounded-lg bg-blue-50 sm:flex">
+                <TrendingUp className="h-5 w-5 text-blue-600" />
+              </div>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={250}>
@@ -1573,8 +1763,8 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
               <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center">
                 <Users className="w-6 h-6 text-blue-600" />
               </div>
-              <span className="text-xs font-semibold px-2 py-1 bg-green-50 text-green-600 rounded-full">
-                +12%
+              <span className="text-xs font-semibold px-2 py-1 bg-blue-50 text-blue-600 rounded-full">
+                Active
               </span>
             </div>
             <h3 className="text-3xl font-bold text-gray-900 mb-1">{stats.totalLeads}</h3>
@@ -1647,7 +1837,7 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
                 <CheckCircle2 className="w-6 h-6 text-green-600" />
               </div>
               <span className="text-xs font-semibold px-2 py-1 bg-green-50 text-green-600 rounded-full">
-                +8%
+                Won
               </span>
             </div>
             <h3 className="text-3xl font-bold text-gray-900 mb-1">{stats.closedWon}</h3>
@@ -1853,6 +2043,26 @@ function StatCard({ label, value, icon: Icon, color, trend }) {
   );
 }
 
+function CRMButton({ variant = 'primary', type = 'button', children, className = '', ...props }) {
+  return <button type={type} className={`crm-btn crm-btn-${variant} ${className}`} {...props}>{children}</button>;
+}
+
+function PageHeader({ title, description, actions }) {
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-gray-900">{title}</h1>
+        {description && <p className="mt-1 text-sm text-gray-600">{description}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-3">{actions}</div>}
+    </div>
+  );
+}
+
+function CRMCard({ children, className = '' }) {
+  return <div className={`crm-card ${className}`}>{children}</div>;
+}
+
 // Updated LeadsPage (Now correctly calls the dynamic PDF generator)
 function LeadsPage({ 
   leads, 
@@ -1861,12 +2071,28 @@ function LeadsPage({
   filterStage, 
   setFilterStage,
   onAddLead,
+  onViewLead,
   onEditLead,
   onDeleteLead,
+  onBulkUpdateStage,
+  onBulkDelete,
   onExport
 }) {
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [scoreFilter, setScoreFilter] = useState('all');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const sources = [...new Set(leads.map(lead => lead.source).filter(Boolean))].sort();
+
   // Sort leads by Score (Highest first)
-  const sortedLeads = [...leads].sort((a, b) => calculateLeadScore(b) - calculateLeadScore(a));
+  const sortedLeads = [...leads]
+    .filter(lead => sourceFilter === 'all' || lead.source === sourceFilter)
+    .filter(lead => scoreFilter === 'all' || calculateLeadScore(lead) >= Number(scoreFilter))
+    .sort((a, b) => calculateLeadScore(b) - calculateLeadScore(a));
+  const allVisibleSelected = sortedLeads.length > 0 && sortedLeads.every(lead => selectedIds.includes(lead.id));
+
+  const toggleSelected = (leadId) => setSelectedIds(prev => prev.includes(leadId) ? prev.filter(id => id !== leadId) : [...prev, leadId]);
+  const toggleAll = () => setSelectedIds(allVisibleSelected ? [] : sortedLeads.map(lead => lead.id));
+  const clearSelection = () => setSelectedIds([]);
 
   return (
     <motion.div
@@ -1874,36 +2100,24 @@ function LeadsPage({
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2 text-gray-900">
-            Leads
-          </h1>
-          <p className="text-gray-600">
-            AI-Scored leads sorted by priority.
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={onExport}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl transition-all border bg-white hover:bg-gray-50 border-gray-300 text-gray-700"
-          >
+      <PageHeader
+        title="Leads"
+        description="Priority-scored leads, sorted for follow-up."
+        actions={<>
+          <CRMButton variant="secondary" onClick={onExport}>
             <Download className="w-4 h-4" />
             Export CSV
-          </button>
-          <button
-            onClick={onAddLead}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[#6366F1]/50 transition-all"
-          >
+          </CRMButton>
+          <CRMButton onClick={onAddLead}>
             <Plus className="w-5 h-5" />
             Add Lead
-          </button>
-        </div>
-      </div>
+          </CRMButton>
+        </>}
+      />
 
       {/* Filters */}
-      <div className="backdrop-blur-xl rounded-2xl p-6 bg-white border border-gray-200 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <CRMCard className="p-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -1924,15 +2138,49 @@ function LeadsPage({
               <option key={stage.id} value={stage.id}>{stage.label}</option>
             ))}
           </select>
+          <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-gray-900 focus:ring-2 focus:ring-[#6366F1]">
+            <option value="all">All sources</option>
+            {sources.map(source => <option key={source} value={source}>{source}</option>)}
+          </select>
+          <select value={scoreFilter} onChange={(event) => setScoreFilter(event.target.value)} className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-gray-900 focus:ring-2 focus:ring-[#6366F1]">
+            <option value="all">Any priority</option>
+            <option value="60">Hot (60+)</option>
+            <option value="30">Warm or hotter (30+)</option>
+          </select>
         </div>
-      </div>
+      </CRMCard>
+
+      {selectedIds.length > 0 && (
+        <div className="sticky top-2 z-10 flex flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-semibold text-indigo-900">{selectedIds.length} lead{selectedIds.length === 1 ? '' : 's'} selected</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select defaultValue="" onChange={(event) => { if (event.target.value) { onBulkUpdateStage(selectedIds, event.target.value); clearSelection(); event.target.value = ''; } }} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-medium text-gray-700">
+              <option value="">Move to stage…</option>
+              {PIPELINE_STAGES.map(stage => <option key={stage.id} value={stage.id}>{stage.label}</option>)}
+            </select>
+            <button type="button" onClick={() => { if (confirm(`Delete ${selectedIds.length} selected lead${selectedIds.length === 1 ? '' : 's'}?`)) { onBulkDelete(selectedIds); clearSelection(); } }} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">Delete</button>
+            <button type="button" onClick={clearSelection} className="rounded-lg px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100">Clear</button>
+          </div>
+        </div>
+      )}
 
       {/* Leads Table */}
-      <div className="backdrop-blur-xl rounded-2xl overflow-hidden bg-white border border-gray-200 shadow-sm">
+      {sortedLeads.length === 0 ? (
+        <EmptyState
+          icon={Users}
+          title={searchTerm || filterStage !== 'all' ? 'No leads match your filters' : 'No leads yet'}
+          description={searchTerm || filterStage !== 'all' ? 'Try clearing a filter or searching for a different lead.' : 'Add your first lead to start building your pipeline.'}
+          actionLabel={searchTerm || filterStage !== 'all' ? undefined : 'Add your first lead'}
+          onAction={searchTerm || filterStage !== 'all' ? undefined : onAddLead}
+        />
+      ) : (
+      <>
+      <div className="hidden overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm md:block">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="w-12 px-4 py-4"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} aria-label="Select all visible leads" /></th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Priority Score</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Name</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Company</th>
@@ -1951,9 +2199,10 @@ function LeadsPage({
 
                 return (
                   <tr key={lead.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-4"><input type="checkbox" checked={selectedIds.includes(lead.id)} onChange={() => toggleSelected(lead.id)} aria-label={`Select ${lead.name}`} /></td>
                     {/* Priority Score Column */}
                     <td className="px-6 py-4">
-                      <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${scoreConfig.bg} ${scoreConfig.color} border border-${scoreConfig.color}/20`}>
+                      <div className={`inline-flex items-center gap-2 rounded-full border border-transparent px-3 py-1 text-xs font-bold ${scoreConfig.bg} ${scoreConfig.color}`}>
                         <ScoreIcon className="w-3 h-3" />
                         {score} - {scoreConfig.label}
                       </div>
@@ -1962,7 +2211,9 @@ function LeadsPage({
                     {/* Name Column */}
                     <td className="px-6 py-4">
                       <div className="font-medium text-gray-900">
-                        {lead.name}
+                        <button type="button" onClick={() => onViewLead(lead)} className="text-left hover:text-[#6366F1]">
+                          {lead.name}
+                        </button>
                       </div>
                     </td>
 
@@ -2070,8 +2321,116 @@ function LeadsPage({
           </table>
         </div>
       </div>
+
+      <div className="space-y-3 md:hidden">
+        {sortedLeads.map(lead => {
+          const stage = PIPELINE_STAGES.find(s => s.id === lead.stage);
+          const score = calculateLeadScore(lead);
+          const scoreConfig = getScoreConfig(score);
+          const ScoreIcon = scoreConfig.icon;
+          return (
+            <article key={lead.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <button type="button" onClick={() => onViewLead(lead)} className="min-w-0 text-left">
+                  <h2 className="truncate font-semibold text-gray-900">{lead.name}</h2>
+                  <p className="truncate text-sm text-gray-500">{lead.company || 'No company listed'}</p>
+                </button>
+                <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${scoreConfig.bg} ${scoreConfig.color}`}>
+                  <ScoreIcon className="h-3 w-3" aria-hidden="true" /> {score}
+                </span>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+                <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ backgroundColor: `${stage?.color}15`, color: stage?.color }}>{stage?.label}</span>
+                <span className="truncate text-gray-500">{lead.email}</span>
+              </div>
+              <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
+                <button type="button" onClick={() => onViewLead(lead)} className="rounded-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">View</button>
+                <button type="button" onClick={() => onEditLead(lead)} className="rounded-lg px-3 py-2 text-sm font-medium text-[#6366F1] hover:bg-indigo-50">Edit</button>
+                <button type="button" onClick={() => { if (confirm('Are you sure you want to delete this lead?')) onDeleteLead(lead.id); }} className="rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50">Delete</button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      </>
+      )}
     </motion.div>
   );
+}
+
+function EmptyState({ icon: Icon, title, description, actionLabel, onAction }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-14 text-center shadow-sm">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-[#6366F1]">
+        <Icon className="h-7 w-7" aria-hidden="true" />
+      </div>
+      <h2 className="mt-4 text-lg font-semibold text-gray-900">{title}</h2>
+      <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">{description}</p>
+      {actionLabel && <button type="button" onClick={onAction} className="mt-5 rounded-xl bg-[#6366F1] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#5558d9]">{actionLabel}</button>}
+    </div>
+  );
+}
+
+function LeadDetailDrawer({ lead, activities = [], onClose, onEdit }) {
+  useModalBehavior(onClose);
+  const stage = PIPELINE_STAGES.find(item => item.id === lead.stage);
+  const score = calculateLeadScore(lead);
+  const scoreConfig = getScoreConfig(score);
+  const isClient = lead.__profileType === 'client';
+  const leadActivity = activities.filter(activity => activity.lead_id === lead.id || activity.leadId === lead.id).slice(0, 8);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-950/40" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <aside className="ml-auto flex h-full w-full max-w-md flex-col bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="lead-drawer-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-gray-200 p-6">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{isClient ? 'Customer profile' : 'Lead details'}</p>
+            <h2 id="lead-drawer-title" className="mt-1 truncate text-2xl font-bold text-gray-900">{lead.name}</h2>
+            <p className="mt-1 text-sm text-gray-500">{lead.company || 'No company listed'}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close lead details" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="flex-1 space-y-6 overflow-y-auto p-6">
+          <div className="flex items-center justify-between rounded-xl bg-gray-50 p-4">
+            <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ backgroundColor: `${stage?.color}15`, color: stage?.color }}>{stage?.label}</span>
+            <span className={`inline-flex items-center gap-1 text-sm font-bold ${scoreConfig.color}`}>{score} {scoreConfig.label}</span>
+          </div>
+          <div className="space-y-4">
+            <DetailRow icon={Mail} label="Email" value={lead.email} />
+            <DetailRow icon={Phone} label="Phone" value={lead.phone || 'Not provided'} />
+            <DetailRow icon={Building2} label="Company" value={lead.company || 'Not provided'} />
+            <DetailRow icon={Clock} label="Created" value={new Date(lead.createdAt).toLocaleDateString()} />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Notes</h3>
+            {lead.notes?.length ? <p className="mt-2 whitespace-pre-wrap text-sm text-gray-600">{lead.notes[0].text}</p> : <p className="mt-2 text-sm text-gray-500">No notes added yet.</p>}
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Activity timeline</h3>
+            {leadActivity.length ? (
+              <div className="mt-3 space-y-3 border-l-2 border-indigo-100 pl-4">
+                {leadActivity.map((activity, index) => (
+                  <div key={activity.id || index} className="relative">
+                    <span className="absolute -left-[1.35rem] top-1 h-2 w-2 rounded-full bg-[#6366F1]" />
+                    <p className="text-sm text-gray-700">{activity.message}</p>
+                    <p className="mt-1 text-xs text-gray-400">{activity.created_at ? new Date(activity.created_at).toLocaleString() : 'Recent'}</p>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="mt-2 text-sm text-gray-500">No activity recorded for this lead yet.</p>}
+          </div>
+        </div>
+        <div className="flex gap-3 border-t border-gray-200 p-6">
+          <button type="button" onClick={onEdit} className="flex-1 rounded-xl bg-[#6366F1] px-4 py-3 text-sm font-semibold text-white hover:bg-[#5558d9]">{isClient ? 'Edit customer' : 'Edit lead'}</button>
+          <a href={generateEmailUrl(lead)} className="rounded-xl border border-gray-300 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">Email</a>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function DetailRow({ icon: Icon, label, value }) {
+  return <div className="flex items-start gap-3"><Icon className="mt-0.5 h-4 w-4 text-gray-400" aria-hidden="true" /><div><p className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</p><p className="mt-0.5 break-words text-sm text-gray-700">{value}</p></div></div>;
 }
 
 // Clients Page Component
@@ -2156,15 +2515,8 @@ function PipelinePage({ leads, view, setView, onDragEnd, onEditLead, searchTerm,
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2 text-gray-900">
-            Sales Pipeline
-          </h1>
-          <p className="text-gray-600">
-            Track leads through your sales process
-          </p>
-        </div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <PageHeader title="Sales Pipeline" description="Track leads through your sales process." />
         <div className="flex items-center gap-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -2389,19 +2741,14 @@ function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMe
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-2 text-gray-900">Meetings</h1>
-          <p className="text-gray-600">Schedule and track client meetings</p>
-        </div>
-        <button
-          onClick={onAddMeeting}
-          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[#6366F1]/50 transition-all"
-        >
+      <PageHeader
+        title="Meetings"
+        description="Schedule and track client meetings."
+        actions={<CRMButton onClick={onAddMeeting}>
           <Plus className="w-5 h-5" />
           Schedule Meeting
-        </button>
-      </div>
+        </CRMButton>}
+      />
 
       {/* Upcoming Meetings */}
       <div className="bg-white backdrop-blur-xl rounded-2xl border border-gray-200 p-6 shadow-sm">
@@ -2546,6 +2893,7 @@ function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMe
 
 // Lead Modal Component
 function LeadModal({ lead, onClose, onSave, onAddNote, onAddReminder }) {
+  useModalBehavior(onClose);
   const [formData, setFormData] = useState({
     name: lead?.name || '',
     company: lead?.company || '',
@@ -2609,20 +2957,33 @@ function LeadModal({ lead, onClose, onSave, onAddNote, onAddReminder }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         className="bg-white rounded-2xl border border-gray-200 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lead-modal-title"
+        tabIndex="-1"
+        onMouseDown={(event) => event.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-2xl font-bold text-gray-900">
+          <h2 id="lead-modal-title" className="text-2xl font-bold text-gray-900">
             {lead ? 'Edit Lead' : 'New Lead'}
           </h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close lead dialog"
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"
           >
             <X className="w-6 h-6" />
@@ -2942,6 +3303,7 @@ function LeadModal({ lead, onClose, onSave, onAddNote, onAddReminder }) {
 
 // Meeting Modal Component
 function MeetingModal({ meeting, leads, onClose, onSave }) {
+  useModalBehavior(onClose);
   const [formData, setFormData] = useState({
     title: '',
     leadId: '',
@@ -2974,19 +3336,32 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         className="bg-white rounded-2xl border border-gray-200 w-full max-w-2xl shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="meeting-modal-title"
+        tabIndex="-1"
+        onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-2xl font-bold text-gray-900">
+          <h2 id="meeting-modal-title" className="text-2xl font-bold text-gray-900">
             {meeting ? 'Edit Meeting' : 'Schedule Meeting'}
           </h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close meeting dialog"
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"
           >
             <X className="w-6 h-6" />
@@ -3397,7 +3772,7 @@ async function sendInvoiceEmail(invoice, customer, getToken) {
   }
 }
 // Invoices Page Component
-function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onDeleteInvoice, onSendInvoice }) {
+function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onDeleteInvoice, onSendInvoice, onNotify }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -3406,16 +3781,16 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
   // Handle sending invoice email
   const handleSendEmail = async (invoice, customer) => {
     if (!customer || !customer.email) {
-      alert('Customer email not found');
+      onNotify('Customer email not found.', 'error');
       return;
     }
 
     setSendingEmail(invoice.id);
     try {
       await onSendInvoice(invoice, customer);
-      alert(`Invoice sent successfully to ${customer.email}!`);
+      onNotify(`Invoice sent successfully to ${customer.email}.`);
     } catch (error) {
-      alert(`Failed to send email: ${error.message}`);
+      onNotify(`Failed to send email: ${error.message}`, 'error');
     } finally {
       setSendingEmail(null);
     }
@@ -3455,19 +3830,14 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
       className="space-y-6"
     >
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
-          <p className="text-gray-600 mt-1">Manage and track your invoices</p>
-        </div>
-        <button
-          onClick={onCreateInvoice}
-          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-[#6366F1]/50 transition-all"
-        >
+      <PageHeader
+        title="Invoices"
+        description="Manage and track your invoices."
+        actions={<CRMButton onClick={onCreateInvoice}>
           <Plus className="w-5 h-5" />
           Create Invoice
-        </button>
-      </div>
+        </CRMButton>}
+      />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -3605,7 +3975,7 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
             <tbody className="divide-y divide-gray-200">
               {filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="px-6 py-12 text-center">
+                  <td colSpan="8" className="px-6 py-12 text-center">
                     <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                     <p className="text-gray-500">No invoices found</p>
                     <button
@@ -3729,6 +4099,7 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
 // Export components
 export { InvoicesPage, InvoiceStatusBadge, generateInvoicePDF };
 function InvoiceModal({ invoice, customers, onClose, onSave }) {
+  useModalBehavior(onClose);
   const [formData, setFormData] = useState({
     customer_id: '',
     invoice_date: new Date().toISOString().split('T')[0],
@@ -3847,12 +4218,23 @@ function InvoiceModal({ invoice, customers, onClose, onSave }) {
   const selectedCustomer = customers.find(c => c.id === formData.customer_id);
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         className="bg-white rounded-xl border border-gray-200 w-full max-w-5xl shadow-2xl max-h-[95vh] flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="invoice-modal-title"
+        tabIndex="-1"
+        onMouseDown={(event) => event.stopPropagation()}
       >
         {/* Compact Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white rounded-t-xl">
@@ -3861,14 +4243,16 @@ function InvoiceModal({ invoice, customers, onClose, onSave }) {
               <FileText className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">
+              <h2 id="invoice-modal-title" className="text-xl font-bold text-gray-900">
                 {invoice ? 'Edit Invoice' : 'Create New Invoice'}
               </h2>
               <p className="text-xs text-gray-500">Fill in the details below</p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close invoice dialog"
             className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"
           >
             <X className="w-5 h-5" />

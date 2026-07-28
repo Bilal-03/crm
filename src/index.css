@@ -1,3 +1,64 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --crm-brand: #6366f1;
+  --crm-brand-dark: #5558d9;
+  --crm-accent: #8b5cf6;
+  --crm-surface: #ffffff;
+  --crm-page: #f9fafb;
+  --crm-border: #e5e7eb;
+  --crm-text: #111827;
+  --crm-muted: #6b7280;
+  --crm-radius: 1rem;
+  --crm-shadow: 0 1px 2px rgb(17 24 39 / 0.04), 0 4px 14px rgb(17 24 39 / 0.04);
+}
+
+@layer components {
+  .crm-card {
+    @apply rounded-2xl border bg-white shadow-sm;
+    border-color: var(--crm-border);
+  }
+
+  .crm-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .crm-btn-primary {
+    @apply text-white shadow-sm hover:shadow-md;
+    background: linear-gradient(135deg, var(--crm-brand), var(--crm-accent));
+  }
+
+  .crm-btn-primary:hover {
+    background: var(--crm-brand-dark);
+  }
+
+  .crm-btn-secondary {
+    @apply border bg-white text-gray-700 hover:bg-gray-50;
+    border-color: var(--crm-border);
+  }
+
+  .crm-field {
+    @apply rounded-lg border bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-shadow placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500;
+    border-color: var(--crm-border);
+  }
+}
+
+@layer base {
+  :where(button, a, input, select, textarea):focus-visible {
+    outline: 3px solid rgba(99, 102, 241, 0.45);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
