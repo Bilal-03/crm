@@ -373,8 +373,17 @@ export default function CRMApp() {
   const fetchApi = api.request;
 
   const [currentPage, setCurrentPage] = useState('dashboard');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const isMobile = useIsMobile();
+  // Keep the desktop sidebar expanded, but never show the mobile drawer until
+  // the user explicitly opens it from the header menu.
+  const [sidebarOpen, setSidebarOpen] = useState(() => (
+    typeof window === 'undefined' || !window.matchMedia('(max-width: 1023px)').matches
+  ));
+
+  useEffect(() => {
+    // Moving from a desktop viewport to mobile should not leave the drawer open.
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
   
   // Data states
   const [leads, setLeads] = useState([]);
