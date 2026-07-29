@@ -2,7 +2,7 @@ import { Resend } from 'resend';
 
 import { getDb } from '../server/db.js';
 import { getRequiredId, HttpError, json, withApiRoute } from '../server/http.js';
-import { getPersonalWorkspace } from '../server/workspaces.js';
+import { getActiveWorkspace } from '../server/workspaces.js';
 
 const MAX_PDF_BYTES = 3 * 1024 * 1024;
 
@@ -17,7 +17,7 @@ export default withApiRoute({
     const invoiceId = getRequiredId({ id: req.body?.invoiceId });
     const pdf = decodePdf(req.body?.pdfBase64);
     const sql = getDb();
-    const workspace = await getPersonalWorkspace(sql, userId);
+    const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
     const rows = await sql`
       SELECT i.invoice_number, i.total_amount, i.due_date, c.name, c.email
       FROM invoices i

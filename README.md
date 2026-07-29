@@ -110,6 +110,7 @@ For an existing database created from the original prototype schema, create a ba
 ```bash
 psql "$NEON_DATABASE_URL" -f migrations/002_production_hardening.sql
 psql "$NEON_DATABASE_URL" -f migrations/003_workspace_foundation.sql
+psql "$NEON_DATABASE_URL" -f migrations/004_team_settings.sql
 ```
 
 ### 4. Start the application

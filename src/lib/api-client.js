@@ -10,7 +10,7 @@ export class ApiClientError extends Error {
   }
 }
 
-export function createApiClient(getToken, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export function createApiClient(getToken, { timeoutMs = DEFAULT_TIMEOUT_MS, workspaceId = null } = {}) {
   return {
     async request(endpoint, options = {}) {
       const token = await getToken();
@@ -31,6 +31,7 @@ export function createApiClient(getToken, { timeoutMs = DEFAULT_TIMEOUT_MS } = {
             Accept: 'application/json',
             ...(body ? { 'Content-Type': 'application/json' } : {}),
             Authorization: `Bearer ${token}`,
+            ...(workspaceId ? { 'X-Workspace-Id': workspaceId } : {}),
             ...options.headers,
           },
         });

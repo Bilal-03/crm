@@ -1,13 +1,13 @@
 import { getDb } from '../server/db.js';
 import { getPagination, getRequiredId, HttpError, json, noContent, paginated, withApiRoute } from '../server/http.js';
 import { validateLead } from '../server/validation.js';
-import { getPersonalWorkspace } from '../server/workspaces.js';
+import { getActiveWorkspace } from '../server/workspaces.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   async handler({ req, res, userId }) {
     const sql = getDb();
-    const workspace = await getPersonalWorkspace(sql, userId);
+    const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
 
     if (req.method === 'GET') {
       const { limit, offset } = getPagination(req.query);

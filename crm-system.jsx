@@ -10,7 +10,8 @@ import {
   Search, Filter, Download, X, Edit2, Trash2, Save, ChevronLeft,
   Mail, Phone, Building2, Clock, AlertCircle, CheckCircle2,
   LayoutGrid, List, Menu, User, Bell, TrendingUp, Activity,
-  Flame, Sun, Snowflake, FileDown, DollarSign, Send, Eye, Printer, BarChart3
+  Flame, Sun, Snowflake, FileDown, DollarSign, Send, Eye, Printer, BarChart3,
+  Settings, UserPlus, UserMinus, Shield
 } from 'lucide-react';
 
 // Add global styles for Light Theme
@@ -376,7 +377,8 @@ export default function CRMApp() {
   const { signOut } = useClerk();
   const [loading, setLoading] = useState(true);
 
-  const api = useMemo(() => createApiClient(getToken), [getToken]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(null);
+  const api = useMemo(() => createApiClient(getToken, { workspaceId: activeWorkspaceId }), [getToken, activeWorkspaceId]);
   const fetchApi = api.request;
 
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -411,6 +413,8 @@ export default function CRMApp() {
   const [filterStage, setFilterStage] = useState('all');
   const [dataLoadErrors, setDataLoadErrors] = useState([]);
   const [toast, setToast] = useState(null);
+  const [teamData, setTeamData] = useState(null);
+  const [receivedInvitations, setReceivedInvitations] = useState([]);
 
   const notify = (message, type = 'success') => {
     setToast({ message, type });
@@ -433,7 +437,7 @@ export default function CRMApp() {
     if (user) {
       fetchData(user.id);
     }
-  }, [user]);
+  }, [user, activeWorkspaceId]);
 
   const customers = useMemo(() => {
     const persisted = customerRecords.map(customer => ({ ...customer, isCustomer: true }));
@@ -505,6 +509,34 @@ export default function CRMApp() {
       notify('We could not load your CRM data. Please try again.', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshTeam = async () => {
+    try {
+      const [team, invitations] = await Promise.all([
+        fetchApi('/team'),
+        fetchApi('/team?view=invitations'),
+      ]);
+      setTeamData(team);
+      setReceivedInvitations(invitations?.invitations || []);
+    } catch (error) {
+      console.error('Error loading team settings:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (user) void refreshTeam();
+  }, [user, activeWorkspaceId]);
+
+  const manageTeam = async (body) => {
+    try {
+      const result = await fetchApi('/team', { method: 'POST', body });
+      await refreshTeam();
+      return result;
+    } catch (error) {
+      notify(error.message || 'Unable to update the team.', 'error');
+      throw error;
     }
   };
 
@@ -1005,6 +1037,10 @@ export default function CRMApp() {
           user={user}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           overdueCount={stats.overdueReminders}
+          workspaceName={teamData?.workspace?.name}
+          workspaces={teamData?.workspaces || []}
+          activeWorkspaceId={activeWorkspaceId || teamData?.workspace?.id}
+          onSelectWorkspace={setActiveWorkspaceId}
         />
 
         {/* Page Content */}
@@ -1122,6 +1158,24 @@ export default function CRMApp() {
             {currentPage === 'reports' && (
               <ReportsPage leads={leads} invoices={invoices} meetings={meetings} />
             )}
+
+            {currentPage === 'team' && (
+              <TeamSettingsPage
+                user={user}
+                teamData={teamData}
+                receivedInvitations={receivedInvitations}
+                activeWorkspaceId={activeWorkspaceId || teamData?.workspace?.id}
+                onSelectWorkspace={setActiveWorkspaceId}
+                onInvite={(email, role) => manageTeam({ action: 'invite', email, role })}
+                onChangeRole={(userId, role) => manageTeam({ action: 'role', userId, role })}
+                onRemove={(userId) => manageTeam({ action: 'remove', userId })}
+                onRevoke={(invitationId) => manageTeam({ action: 'revoke', invitationId })}
+                onAccept={async (invitationId) => {
+                  const result = await manageTeam({ action: 'accept', invitationId });
+                  setActiveWorkspaceId(result.workspaceId);
+                }}
+              />
+            )}
           </AnimatePresence>
         </main>
       </div>
@@ -1216,6 +1270,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
     { id: 'clients', icon: Target, label: 'Clients' },
     { id: 'pipeline', icon: Activity, label: 'Pipeline' },
     { id: 'reports', icon: BarChart3, label: 'Reports' },
+    { id: 'team', icon: Settings, label: 'Team Settings' },
     { id: 'invoices', icon: FileText, label: 'Invoices' },
     { id: 'meetings', icon: Calendar, label: 'Meetings' }
   ];
@@ -1286,7 +1341,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
 }
 
 // Header Component  
-function Header({ user, onToggleSidebar, overdueCount }) {
+function Header({ user, onToggleSidebar, overdueCount, workspaceName, workspaces, activeWorkspaceId, onSelectWorkspace }) {
   return (
     <header className="bg-white/50 backdrop-blur-xl border-b border-gray-200 px-4 py-3 md:px-8 md:py-4">
       <div className="flex items-center justify-between">
@@ -1300,7 +1355,12 @@ function Header({ user, onToggleSidebar, overdueCount }) {
           <Menu className="w-6 h-6 text-gray-700" />
         </button>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {workspaces.length > 0 && (
+            <select aria-label="Active workspace" value={activeWorkspaceId || ''} onChange={(event) => onSelectWorkspace(event.target.value)} className="hidden max-w-44 rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm font-semibold text-gray-700 md:block">
+              {workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+            </select>
+          )}
           {overdueCount > 0 && (
             <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
               <AlertCircle className="w-4 h-4 text-red-500" />
@@ -2270,6 +2330,35 @@ function ReportsPage({ leads, invoices, meetings }) {
           <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Average leads / day</p><p className="mt-2 text-2xl font-bold text-gray-900">{(leadsInRange.length / rangeDays).toFixed(1)}</p></div>
         </div>
       </section>
+    </motion.div>
+  );
+}
+
+function TeamSettingsPage({ user, teamData, receivedInvitations, activeWorkspaceId, onSelectWorkspace, onInvite, onChangeRole, onRemove, onRevoke, onAccept }) {
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('member');
+  const [saving, setSaving] = useState(false);
+  const workspace = teamData?.workspace;
+  const canManage = ['owner', 'admin'].includes(workspace?.role);
+  const isOwner = workspace?.role === 'owner';
+
+  const invite = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    try { await onInvite(email, role); setEmail(''); } finally { setSaving(false); }
+  };
+
+  if (!teamData) return <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-gray-500">Loading team settings…</div>;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      <PageHeader title="Team Settings" description={`Manage access to ${workspace.name}.`} />
+      {teamData.workspaces.length > 1 && <label className="block md:hidden"><span className="mb-2 block text-sm font-semibold text-gray-700">Active workspace</span><select value={activeWorkspaceId || ''} onChange={event => onSelectWorkspace(event.target.value)} className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700">{teamData.workspaces.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+      {receivedInvitations.length > 0 && <section className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5"><h2 className="text-lg font-bold text-indigo-950">Workspace invitations</h2><div className="mt-3 space-y-3">{receivedInvitations.map(invite => <div key={invite.id} className="flex flex-col gap-3 rounded-xl bg-white p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-gray-900">Join {invite.workspace_name}</p><p className="text-sm text-gray-500">Role: {invite.role}</p></div><button type="button" onClick={() => onAccept(invite.id)} className="rounded-lg bg-[#6366F1] px-4 py-2 text-sm font-semibold text-white">Accept invitation</button></div>)}</div></section>}
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><div className="flex items-center gap-3"><div className="rounded-xl bg-indigo-50 p-3 text-[#6366F1]"><Shield className="h-6 w-6" /></div><div><h2 className="font-bold text-gray-900">{workspace.name}</h2><p className="text-sm text-gray-500">Your role: <span className="capitalize font-semibold">{workspace.role}</span></p></div></div></section>
+      {canManage && <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-bold text-gray-900">Invite a teammate</h2><p className="mt-1 text-sm text-gray-500">They can accept the invite after creating or signing into their CRM account.</p><form onSubmit={invite} className="mt-4 flex flex-col gap-3 sm:flex-row"><input required type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="teammate@company.com" className="min-h-11 flex-1 rounded-lg border border-gray-300 px-3" /><select value={role} onChange={event => setRole(event.target.value)} className="min-h-11 rounded-lg border border-gray-300 px-3"><option value="member">Member</option><option value="admin">Admin</option></select><button disabled={saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#6366F1] px-4 text-sm font-semibold text-white disabled:opacity-50"><UserPlus className="h-4 w-4" />Invite</button></form></section>}
+      <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"><div className="border-b border-gray-200 p-5"><h2 className="text-lg font-bold text-gray-900">Members</h2></div><div className="divide-y divide-gray-100">{teamData.members.map(member => <div key={member.user_id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-gray-900">{member.email || (member.user_id === user.id ? user.primaryEmailAddress?.emailAddress : 'Workspace member')}</p><p className="text-sm capitalize text-gray-500">{member.role}</p></div>{member.role !== 'owner' && canManage && <div className="flex gap-2">{isOwner && <select value={member.role} onChange={event => onChangeRole(member.user_id, event.target.value)} className="rounded-lg border border-gray-300 px-2 py-2 text-sm"><option value="admin">Admin</option><option value="member">Member</option></select>}<button type="button" onClick={() => onRemove(member.user_id)} className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-600"><UserMinus className="h-4 w-4" />Remove</button></div>}</div>)}</div></section>
+      {canManage && teamData.invitations.length > 0 && <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-bold text-gray-900">Pending invitations</h2><div className="mt-3 space-y-3">{teamData.invitations.map(invite => <div key={invite.id} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 p-3"><div><p className="font-medium text-gray-900">{invite.email}</p><p className="text-xs capitalize text-gray-500">{invite.role} · expires {new Date(invite.expires_at).toLocaleDateString()}</p></div><button type="button" onClick={() => onRevoke(invite.id)} className="text-sm font-semibold text-red-600">Revoke</button></div>)}</div></section>}
     </motion.div>
   );
 }
