@@ -944,6 +944,11 @@ export default function CRMApp() {
     );
   }
 
+  const navigateTo = (page) => {
+    setCurrentPage(page);
+    if (isMobile) setSidebarOpen(false);
+  };
+
   return (
     <div className="flex h-screen overflow-hidden font-sans bg-gray-50 text-gray-900">
       {/* Sidebar */}
@@ -951,10 +956,7 @@ export default function CRMApp() {
         open={sidebarOpen}
         mobile={isMobile}
         currentPage={currentPage}
-        onNavigate={(page) => {
-          setCurrentPage(page);
-          if (isMobile) setSidebarOpen(false);
-        }}
+        onNavigate={navigateTo}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         onSignOut={signOut}
       />
@@ -977,7 +979,7 @@ export default function CRMApp() {
         />
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+        <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-8">
           {dataLoadErrors.length > 0 && (
             <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
               <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
@@ -1005,7 +1007,7 @@ export default function CRMApp() {
                 leads={leads}
                 invoices={invoices}
                 customers={customers}
-                onNavigate={setCurrentPage}
+                onNavigate={navigateTo}
                 onAddLead={() => setShowLeadModal(true)}
               />
             )}
@@ -1090,6 +1092,12 @@ export default function CRMApp() {
           </AnimatePresence>
         </main>
       </div>
+
+      <MobileBottomNav
+        currentPage={currentPage}
+        onNavigate={navigateTo}
+        onOpenMenu={() => setSidebarOpen(true)}
+      />
 
       {/* Modals */}
       {showLeadModal && (
@@ -1284,6 +1292,45 @@ function Header({ user, onToggleSidebar, overdueCount }) {
   );
 }
 
+function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
+  const items = [
+    { id: 'dashboard', label: 'Home', icon: Home },
+    { id: 'leads', label: 'Leads', icon: Users },
+    { id: 'pipeline', label: 'Pipeline', icon: Activity },
+  ];
+  const moreActive = !items.some(item => item.id === currentPage);
+
+  return (
+    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-20 flex border-t border-gray-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
+      {items.map(({ id, label, icon: Icon }) => {
+        const active = currentPage === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onNavigate(id)}
+            aria-current={active ? 'page' : undefined}
+            className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${active ? 'bg-indigo-50 text-[#6366F1]' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
+          >
+            <Icon className="h-5 w-5" aria-hidden="true" />
+            {label}
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        onClick={onOpenMenu}
+        aria-label="Open more navigation options"
+        aria-current={moreActive ? 'page' : undefined}
+        className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${moreActive ? 'bg-indigo-50 text-[#6366F1]' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
+      >
+        <Menu className="h-5 w-5" aria-hidden="true" />
+        More
+      </button>
+    </nav>
+  );
+}
+
 function PriorityAction({ icon: Icon, label, value, tone, onClick }) {
   const tones = {
     red: 'bg-red-50 text-red-700 border-red-100',
@@ -1402,6 +1449,7 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
 
   const todayMeetings = upcomingMeetings.filter(meeting => new Date(meeting.dateTime).toDateString() === new Date().toDateString());
   const priorityCount = overdueInvoices.length + overdueReminders.length + todayMeetings.length;
+  const isFirstUse = leads.length === 0 && meetings.length === 0 && invoices.length === 0 && customers.length === 0;
 
   return (
     <motion.div
@@ -1454,6 +1502,40 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
         </div>
 
       </div>
+
+      {isFirstUse && (
+        <section className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="getting-started-title">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-[#6366F1]">GETTING STARTED</p>
+              <h2 id="getting-started-title" className="mt-1 text-xl font-bold text-gray-900">Build your first sales workflow</h2>
+              <p className="mt-2 max-w-2xl text-sm text-gray-600">Start with a lead, move it through the pipeline, then schedule the next conversation when it matters.</p>
+            </div>
+            <button type="button" onClick={onAddLead} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#6366F1] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#5558d9] focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:ring-offset-2">
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Add your first lead
+            </button>
+          </div>
+          <ol className="mt-6 grid gap-3 sm:grid-cols-3">
+            {[
+              ['1', 'Capture a lead', 'Add contact details and a source.'],
+              ['2', 'Qualify the opportunity', 'Use the pipeline to track progress.'],
+              ['3', 'Schedule follow-up', 'Create a meeting or reminder.'],
+            ].map(([number, title, description]) => (
+              <li key={number} className="flex gap-3 rounded-xl bg-gray-50 p-4">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-[#6366F1]">{number}</span>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+                  <p className="mt-1 text-xs leading-5 text-gray-600">{description}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-4 flex justify-end">
+            <button type="button" onClick={() => onNavigate('pipeline')} className="text-sm font-semibold text-[#6366F1] hover:text-[#4f46e5]">Explore the pipeline →</button>
+          </div>
+        </section>
+      )}
 
       {/* Priority work */}
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm" aria-labelledby="priority-work-title">
@@ -2090,6 +2172,8 @@ function LeadsPage({
   const [sourceFilter, setSourceFilter] = useState('all');
   const [scoreFilter, setScoreFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [leadPage, setLeadPage] = useState(1);
+  const pageSize = 25;
   const sources = [...new Set(leads.map(lead => lead.source).filter(Boolean))].sort();
 
   // Sort leads by Score (Highest first)
@@ -2097,10 +2181,23 @@ function LeadsPage({
     .filter(lead => sourceFilter === 'all' || lead.source === sourceFilter)
     .filter(lead => scoreFilter === 'all' || calculateLeadScore(lead) >= Number(scoreFilter))
     .sort((a, b) => calculateLeadScore(b) - calculateLeadScore(a));
-  const allVisibleSelected = sortedLeads.length > 0 && sortedLeads.every(lead => selectedIds.includes(lead.id));
+  const pageCount = Math.max(1, Math.ceil(sortedLeads.length / pageSize));
+  const visibleLeads = sortedLeads.slice((leadPage - 1) * pageSize, leadPage * pageSize);
+  const allVisibleSelected = visibleLeads.length > 0 && visibleLeads.every(lead => selectedIds.includes(lead.id));
+
+  useEffect(() => {
+    setLeadPage(1);
+  }, [searchTerm, filterStage, sourceFilter, scoreFilter]);
+
+  useEffect(() => {
+    if (leadPage > pageCount) setLeadPage(pageCount);
+  }, [leadPage, pageCount]);
 
   const toggleSelected = (leadId) => setSelectedIds(prev => prev.includes(leadId) ? prev.filter(id => id !== leadId) : [...prev, leadId]);
-  const toggleAll = () => setSelectedIds(allVisibleSelected ? [] : sortedLeads.map(lead => lead.id));
+  const toggleAll = () => setSelectedIds(prev => {
+    const visibleIds = visibleLeads.map(lead => lead.id);
+    return allVisibleSelected ? prev.filter(id => !visibleIds.includes(id)) : [...new Set([...prev, ...visibleIds])];
+  });
   const clearSelection = () => setSelectedIds([]);
 
   return (
@@ -2200,7 +2297,7 @@ function LeadsPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {sortedLeads.map(lead => {
+              {visibleLeads.map(lead => {
                 const stage = PIPELINE_STAGES.find(s => s.id === lead.stage);
                 const score = calculateLeadScore(lead);
                 const scoreConfig = getScoreConfig(score);
@@ -2332,7 +2429,7 @@ function LeadsPage({
       </div>
 
       <div className="space-y-3 md:hidden">
-        {sortedLeads.map(lead => {
+        {visibleLeads.map(lead => {
           const stage = PIPELINE_STAGES.find(s => s.id === lead.stage);
           const score = calculateLeadScore(lead);
           const scoreConfig = getScoreConfig(score);
@@ -2361,6 +2458,16 @@ function LeadsPage({
           );
         })}
       </div>
+      {pageCount > 1 && (
+        <nav aria-label="Lead list pagination" className="flex flex-col gap-3 border-t border-gray-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between md:px-0 md:pt-0">
+          <p className="text-sm text-gray-500">Showing {(leadPage - 1) * pageSize + 1}–{Math.min(leadPage * pageSize, sortedLeads.length)} of {sortedLeads.length} leads</p>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setLeadPage(page => Math.max(1, page - 1))} disabled={leadPage === 1} className="min-h-10 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">Previous</button>
+            <span className="min-w-20 text-center text-sm font-medium text-gray-600">Page {leadPage} of {pageCount}</span>
+            <button type="button" onClick={() => setLeadPage(page => Math.min(pageCount, page + 1))} disabled={leadPage === pageCount} className="min-h-10 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40">Next</button>
+          </div>
+        </nav>
+      )}
       </>
       )}
     </motion.div>
