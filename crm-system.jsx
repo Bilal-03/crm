@@ -1018,6 +1018,12 @@ export default function CRMApp() {
         mobile={isMobile}
         currentPage={currentPage}
         onNavigate={navigateTo}
+        workspaces={teamData?.workspaces || []}
+        activeWorkspaceId={activeWorkspaceId || teamData?.workspace?.id}
+        onSelectWorkspace={(workspaceId) => {
+          setActiveWorkspaceId(workspaceId);
+          if (isMobile) setSidebarOpen(false);
+        }}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         onSignOut={signOut}
       />
@@ -1264,7 +1270,7 @@ export default function CRMApp() {
 
 
 // Sidebar Component
-function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
+function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces, activeWorkspaceId, onSelectWorkspace }) {
   const menuItems = [
     { id: 'dashboard', icon: Home, label: 'Dashboard' },
     { id: 'leads', icon: Users, label: 'Leads' },
@@ -1302,6 +1308,15 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
           )}
         </motion.div>
       </div>
+
+      {mobile && open && workspaces.length > 0 && (
+        <div className="border-b border-gray-200 px-6 py-4 lg:hidden">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500" htmlFor="mobile-workspace-selector">Workspace</label>
+          <select id="mobile-workspace-selector" value={activeWorkspaceId || ''} onChange={(event) => onSelectWorkspace(event.target.value)} className="mt-2 min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800">
+            {workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+          </select>
+        </div>
+      )}
 
       <nav className="flex-1 space-y-2 overflow-y-auto p-4">
         {menuItems.map(item => (
