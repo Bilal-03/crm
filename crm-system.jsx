@@ -714,6 +714,28 @@ export default function CRMApp() {
     else addActivity('reminder_set', `Follow-up reminder set`, leadId);
   };
 
+  const completeReminder = async (leadId, reminderId) => {
+    const lead = leads.find(item => item.id === leadId);
+    if (!lead) return;
+
+    const updatedReminders = (lead.reminders || []).map(reminder => (
+      reminder.id === reminderId ? { ...reminder, completed: true, completedAt: new Date().toISOString() } : reminder
+    ));
+
+    setLeads(prev => prev.map(item => item.id === leadId ? { ...item, reminders: updatedReminders } : item));
+    setSelectedLead(prev => prev?.id === leadId ? { ...prev, reminders: updatedReminders } : prev);
+
+    try {
+      await fetchApi(`/leads?id=${leadId}`, { method: 'PUT', body: { reminders: updatedReminders } });
+      addActivity('reminder_completed', `Follow-up completed for ${lead.name}`, leadId);
+      notify('Follow-up marked complete.');
+    } catch (error) {
+      setLeads(prev => prev.map(item => item.id === leadId ? lead : item));
+      setSelectedLead(prev => prev?.id === leadId ? lead : prev);
+      notify(error.message || 'Failed to complete follow-up.', 'error');
+    }
+  };
+
   // 4. Meeting Operations
   const addMeeting = async (meetingData) => {
     const dbMeeting = {
@@ -1118,6 +1140,7 @@ export default function CRMApp() {
           }}
           onAddNote={addNote}
           onAddReminder={addReminder}
+          onCompleteReminder={completeReminder}
         />
       )}
 
@@ -1442,6 +1465,16 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
     )
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
+  const weekFromNow = new Date();
+  weekFromNow.setDate(weekFromNow.getDate() + 7);
+  const upcomingReminders = leads
+    .flatMap(lead =>
+      (lead.reminders || [])
+        .filter(reminder => !reminder.completed && new Date(reminder.date) >= new Date() && new Date(reminder.date) <= weekFromNow)
+        .map(reminder => ({ ...reminder, leadName: lead.name, leadId: lead.id }))
+    )
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
   // Calculate pipeline value
   const pipelineValue = leads
     .filter(l => ['qualified', 'proposal'].includes(l.stage))
@@ -1548,12 +1581,36 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
             {priorityCount ? `${priorityCount} item${priorityCount === 1 ? '' : 's'} to review` : 'All clear'}
           </span>
         </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <PriorityAction icon={AlertCircle} label="Overdue invoices" value={overdueInvoices.length} tone="red" onClick={() => onNavigate('invoices')} />
           <PriorityAction icon={Clock} label="Overdue reminders" value={overdueReminders.length} tone="orange" onClick={() => onNavigate('pipeline')} />
+          <PriorityAction icon={CheckCircle2} label="Follow-ups this week" value={upcomingReminders.length} tone="blue" onClick={() => onNavigate('leads')} />
           <PriorityAction icon={Calendar} label="Meetings today" value={todayMeetings.length} tone="blue" onClick={() => onNavigate('meetings')} />
         </div>
       </section>
+
+      {upcomingReminders.length > 0 && (
+        <section className="rounded-2xl border border-blue-100 bg-blue-50/40 p-5 shadow-sm" aria-labelledby="upcoming-follow-ups-title">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 id="upcoming-follow-ups-title" className="text-lg font-bold text-gray-900">Upcoming follow-ups</h2>
+              <p className="mt-1 text-sm text-gray-600">Keep momentum by acting on the next seven days of planned outreach.</p>
+            </div>
+            <button type="button" onClick={() => onNavigate('leads')} className="shrink-0 text-sm font-semibold text-[#6366F1] hover:text-[#4f46e5]">View leads →</button>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {upcomingReminders.slice(0, 3).map(reminder => (
+              <button key={reminder.id} type="button" onClick={() => onNavigate('leads')} className="rounded-xl border border-blue-100 bg-white p-4 text-left transition hover:border-blue-300 hover:shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="line-clamp-2 text-sm font-semibold text-gray-900">{reminder.note}</p>
+                  <Clock className="h-4 w-4 shrink-0 text-blue-600" aria-hidden="true" />
+                </div>
+                <p className="mt-2 text-xs text-gray-500">{reminder.leadName} · {new Date(reminder.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</p>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Financial Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -2625,6 +2682,14 @@ function ClientsPage({ clients, onViewClient }) {
 
 // Pipeline Page Component
 function PipelinePage({ leads, view, setView, onDragEnd, onEditLead, searchTerm, setSearchTerm }) {
+  const activeLeads = leads.filter(lead => !['closed-won', 'closed-lost'].includes(lead.stage)).length;
+  const wonLeads = leads.filter(lead => lead.stage === 'closed-won').length;
+  const closedLeads = leads.filter(lead => ['closed-won', 'closed-lost'].includes(lead.stage)).length;
+  const conversionRate = closedLeads ? Math.round((wonLeads / closedLeads) * 100) : 0;
+  const overdueFollowUps = leads.reduce((count, lead) => (
+    count + (lead.reminders || []).filter(reminder => !reminder.completed && new Date(reminder.date) < new Date()).length
+  ), 0);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -2671,6 +2736,20 @@ function PipelinePage({ leads, view, setView, onDragEnd, onEditLead, searchTerm,
         </div>
       </div>
 
+      <section aria-label="Pipeline summary" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          { label: 'Active opportunities', value: activeLeads, tone: 'border-indigo-100 bg-indigo-50 text-indigo-700' },
+          { label: 'Won', value: wonLeads, tone: 'border-emerald-100 bg-emerald-50 text-emerald-700' },
+          { label: 'Close rate', value: `${conversionRate}%`, tone: 'border-violet-100 bg-violet-50 text-violet-700' },
+          { label: 'Overdue follow-ups', value: overdueFollowUps, tone: overdueFollowUps ? 'border-red-100 bg-red-50 text-red-700' : 'border-gray-200 bg-gray-50 text-gray-700' },
+        ].map(metric => (
+          <div key={metric.label} className={`rounded-xl border p-4 ${metric.tone}`}>
+            <p className="text-xs font-semibold uppercase tracking-wide opacity-75">{metric.label}</p>
+            <p className="mt-2 text-2xl font-bold">{metric.value}</p>
+          </div>
+        ))}
+      </section>
+
       {view === 'kanban' ? (
         <KanbanView leads={leads} onDragEnd={onDragEnd} onEditLead={onEditLead}  />
       ) : (
@@ -2690,7 +2769,8 @@ function KanbanView({ leads, onDragEnd, onEditLead }) {
           return (
             <div key={stage.id} className="flex flex-col">
               <div className="mb-4">
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2">
                   <div
                     className="w-3 h-3 rounded-full"
                     style={{ backgroundColor: stage.color }}
@@ -2701,6 +2781,8 @@ function KanbanView({ leads, onDragEnd, onEditLead }) {
                   <span className="text-sm text-gray-500">
                     ({stageLeads.length})
                   </span>
+                  </div>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-500 shadow-sm">{stageLeads.length === 1 ? '1 lead' : `${stageLeads.length} leads`}</span>
                 </div>
               </div>
 
@@ -3008,7 +3090,7 @@ function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMe
 }
 
 // Lead Modal Component
-function LeadModal({ lead, onClose, onSave, onAddNote, onAddReminder }) {
+function LeadModal({ lead, onClose, onSave, onAddNote, onAddReminder, onCompleteReminder }) {
   useModalBehavior(onClose);
   const [formData, setFormData] = useState({
     name: lead?.name || '',
@@ -3402,6 +3484,14 @@ function LeadModal({ lead, onClose, onSave, onAddNote, onAddReminder }) {
                           <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 ml-3" />
                         )}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => onCompleteReminder(lead.id, reminder.id)}
+                        className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg border border-green-200 bg-white px-3 py-2 text-sm font-semibold text-green-700 transition hover:bg-green-50"
+                      >
+                        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                        Mark complete
+                      </button>
                     </div>
                   );
                 })}
