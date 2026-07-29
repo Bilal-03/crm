@@ -992,7 +992,7 @@ export default function CRMApp() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header */}
         <Header 
           user={user}
@@ -1111,6 +1111,10 @@ export default function CRMApp() {
                 onNotify={notify}
               />
             )}
+
+            {currentPage === 'reports' && (
+              <ReportsPage leads={leads} invoices={invoices} meetings={meetings} />
+            )}
           </AnimatePresence>
         </main>
       </div>
@@ -1204,6 +1208,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
     { id: 'leads', icon: Users, label: 'Leads' },
     { id: 'clients', icon: Target, label: 'Clients' },
     { id: 'pipeline', icon: Activity, label: 'Pipeline' },
+    { id: 'reports', icon: BarChart, label: 'Reports' },
     { id: 'invoices', icon: FileText, label: 'Invoices' },
     { id: 'meetings', icon: Calendar, label: 'Meetings' }
   ];
@@ -2163,6 +2168,105 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
   );
 }
 
+function ReportsPage({ leads, invoices, meetings }) {
+  const [rangeDays, setRangeDays] = useState(30);
+  const rangeStart = new Date();
+  rangeStart.setHours(0, 0, 0, 0);
+  rangeStart.setDate(rangeStart.getDate() - (rangeDays - 1));
+
+  const leadsInRange = leads.filter(lead => new Date(lead.createdAt) >= rangeStart);
+  const invoicesInRange = invoices.filter(invoice => {
+    const paymentDate = invoice.paid_at || invoice.invoice_date;
+    return invoice.status === 'paid' && paymentDate && new Date(paymentDate) >= rangeStart;
+  });
+  const meetingsInRange = meetings.filter(meeting => new Date(meeting.dateTime) >= rangeStart);
+  const wonInRange = leadsInRange.filter(lead => lead.stage === 'closed-won').length;
+  const closedInRange = leadsInRange.filter(lead => ['closed-won', 'closed-lost'].includes(lead.stage)).length;
+  const conversionRate = closedInRange ? Math.round((wonInRange / closedInRange) * 100) : 0;
+  const revenue = invoicesInRange.reduce((sum, invoice) => sum + Number(invoice.total_amount || 0), 0);
+
+  const sourceData = Object.entries(leadsInRange.reduce((sources, lead) => {
+    const source = lead.source || 'Unknown';
+    sources[source] = (sources[source] || 0) + 1;
+    return sources;
+  }, {})).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 6);
+  const funnelData = PIPELINE_STAGES.map(stage => ({
+    name: stage.label,
+    count: leadsInRange.filter(lead => lead.stage === stage.id).length,
+    color: stage.color,
+  }));
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      <PageHeader
+        title="Reports"
+        description="Measure the lead, pipeline, and revenue signals that guide your next decisions."
+        actions={(
+          <select aria-label="Reporting period" value={rangeDays} onChange={event => setRangeDays(Number(event.target.value))} className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 focus:ring-2 focus:ring-[#6366F1]">
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+            <option value={365}>Last 12 months</option>
+          </select>
+        )}
+      />
+
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Report summary">
+        <StatCard label="New leads" value={leadsInRange.length} icon={Users} color="#6366F1" />
+        <StatCard label="Deals won" value={wonInRange} icon={CheckCircle2} color="#10B981" />
+        <StatCard label="Close rate" value={`${conversionRate}%`} icon={TrendingUp} color="#8B5CF6" />
+        <StatCard label="Revenue collected" value={`$${revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={DollarSign} color="#059669" />
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-5">
+            <h2 className="text-lg font-bold text-gray-900">Lead sources</h2>
+            <p className="mt-1 text-sm text-gray-500">Where new leads originated during this period.</p>
+          </div>
+          {sourceData.length ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={sourceData} layout="vertical" margin={{ left: 12 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                <XAxis type="number" allowDecimals={false} stroke="#94a3b8" />
+                <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} stroke="#64748b" />
+                <RechartsTooltip />
+                <Bar dataKey="count" name="Leads" fill="#6366F1" radius={[0, 6, 6, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <p className="py-24 text-center text-sm text-gray-500">No leads in this reporting period.</p>}
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-5">
+            <h2 className="text-lg font-bold text-gray-900">Pipeline funnel</h2>
+            <p className="mt-1 text-sm text-gray-500">How new leads are currently distributed by stage.</p>
+          </div>
+          {leadsInRange.length ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={funnelData} margin={{ top: 8, right: 8, left: -20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} stroke="#64748b" />
+                <YAxis allowDecimals={false} stroke="#94a3b8" />
+                <RechartsTooltip />
+                <Bar dataKey="count" name="Leads" fill="#8B5CF6" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <p className="py-24 text-center text-sm text-gray-500">Add leads to begin tracking the funnel.</p>}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+        <h2 className="text-lg font-bold text-gray-900">Activity snapshot</h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Meetings scheduled</p><p className="mt-2 text-2xl font-bold text-gray-900">{meetingsInRange.length}</p></div>
+          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Paid invoices</p><p className="mt-2 text-2xl font-bold text-gray-900">{invoicesInRange.length}</p></div>
+          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Average leads / day</p><p className="mt-2 text-2xl font-bold text-gray-900">{(leadsInRange.length / rangeDays).toFixed(1)}</p></div>
+        </div>
+      </section>
+    </motion.div>
+  );
+}
+
 // Stat Card Component
 function StatCard({ label, value, icon: Icon, color, trend }) {
   return (
@@ -2696,9 +2800,9 @@ function PipelinePage({ leads, view, setView, onDragEnd, onEditLead, searchTerm,
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <PageHeader title="Sales Pipeline" description="Track leads through your sales process." />
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -2706,13 +2810,13 @@ function PipelinePage({ leads, view, setView, onDragEnd, onEditLead, searchTerm,
               placeholder="Search..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 rounded-lg focus:ring-2 focus:ring-[#6366F1] focus:border-transparent outline-none w-64 bg-white border border-gray-300 text-gray-900 placeholder-gray-400"
+              className="w-full rounded-lg border border-gray-300 bg-white py-3 pl-10 pr-4 text-gray-900 outline-none focus:border-transparent focus:ring-2 focus:ring-[#6366F1] lg:w-64 lg:py-2"
             />
           </div>
-          <div className="flex rounded-lg p-1 border bg-white border-gray-300">
+          <div className="grid w-full grid-cols-2 rounded-lg border border-gray-300 bg-white p-1 lg:w-auto">
             <button
               onClick={() => setView('kanban')}
-              className={`px-4 py-2 rounded-md flex items-center gap-2 transition-all ${
+              className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-3 py-2 transition-all ${
                 view === 'kanban' 
                   ? 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white'
                   : 'text-gray-600 hover:text-gray-900'
@@ -2723,7 +2827,7 @@ function PipelinePage({ leads, view, setView, onDragEnd, onEditLead, searchTerm,
             </button>
             <button
               onClick={() => setView('table')}
-              className={`px-4 py-2 rounded-md flex items-center gap-2 transition-all ${
+              className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-3 py-2 transition-all ${
                 view === 'table' 
                   ? 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white'
                   : 'text-gray-600 hover:text-gray-900'
