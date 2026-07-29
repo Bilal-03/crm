@@ -6,6 +6,10 @@ export default {
     "./crm-system.jsx"
   ],
   darkMode: 'class',
+  future: {
+    // Prevent touch browsers from treating the first tap as a persistent hover.
+    hoverOnlyWhenSupported: true,
+  },
   theme: {
     extend: {
       fontFamily: {

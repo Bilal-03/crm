@@ -30,10 +30,6 @@
     background: linear-gradient(135deg, var(--crm-brand), var(--crm-accent));
   }
 
-  .crm-btn-primary:hover {
-    background: var(--crm-brand-dark);
-  }
-
   .crm-btn-secondary {
     @apply border bg-white text-gray-700 hover:bg-gray-50;
     border-color: var(--crm-border);
@@ -46,6 +42,11 @@
 }
 
 @layer base {
+  :where(button, [role='button']) {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   :where(button, a, input, select, textarea):focus-visible {
     outline: 3px solid rgba(99, 102, 241, 0.45);
     outline-offset: 2px;
@@ -60,5 +61,11 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .crm-btn-primary:hover {
+    background: var(--crm-brand-dark);
   }
 }

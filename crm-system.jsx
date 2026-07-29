@@ -1248,7 +1248,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
         </motion.div>
       </div>
 
-      <nav className="flex-1 p-4 space-y-2">
+      <nav className="flex-1 space-y-2 overflow-y-auto p-4">
         {menuItems.map(item => (
           <button
             key={item.id}
@@ -1270,7 +1270,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
         ))}
       </nav>
 
-      <div className="p-4 border-t border-gray-200">
+      <div className="mb-[calc(4.5rem+env(safe-area-inset-bottom))] shrink-0 border-t border-gray-200 p-4 lg:mb-0">
         <button
           onClick={onSignOut}
           aria-label={open ? undefined : 'Sign out'}
