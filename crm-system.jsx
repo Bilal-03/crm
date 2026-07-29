@@ -10,7 +10,7 @@ import {
   Search, Filter, Download, X, Edit2, Trash2, Save, ChevronLeft,
   Mail, Phone, Building2, Clock, AlertCircle, CheckCircle2,
   LayoutGrid, List, Menu, User, Bell, TrendingUp, Activity,
-  Flame, Sun, Snowflake, FileDown, DollarSign, Send, Eye, Printer
+  Flame, Sun, Snowflake, FileDown, DollarSign, Send, Eye, Printer, BarChart3
 } from 'lucide-react';
 
 // Add global styles for Light Theme
@@ -1208,7 +1208,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
     { id: 'leads', icon: Users, label: 'Leads' },
     { id: 'clients', icon: Target, label: 'Clients' },
     { id: 'pipeline', icon: Activity, label: 'Pipeline' },
-    { id: 'reports', icon: BarChart, label: 'Reports' },
+    { id: 'reports', icon: BarChart3, label: 'Reports' },
     { id: 'invoices', icon: FileText, label: 'Invoices' },
     { id: 'meetings', icon: Calendar, label: 'Meetings' }
   ];
@@ -1329,7 +1329,7 @@ function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
   const moreActive = !items.some(item => item.id === currentPage);
 
   return (
-    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-20 flex border-t border-gray-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
+    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-50 flex border-t border-gray-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
       {items.map(({ id, label, icon: Icon }) => {
         const active = currentPage === id;
         return (
