@@ -29,6 +29,13 @@ if (typeof document !== 'undefined') {
       background-color: #f9fafb; /* Light background */
       color: #111827; /* Dark text */
     }
+
+    @media (hover: hover) {
+      .mobile-nav-item:not([aria-current='page']):hover {
+        background-color: #f9fafb;
+        color: #111827;
+      }
+    }
     
     ::-webkit-scrollbar {
       width: 8px;
@@ -1338,7 +1345,7 @@ function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
             type="button"
             onClick={() => onNavigate(id)}
             aria-current={active ? 'page' : undefined}
-            className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${active ? 'bg-indigo-50 text-[#6366F1]' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
+            className={`mobile-nav-item touch-manipulation flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${active ? 'bg-indigo-50 text-[#6366F1]' : 'text-gray-500'}`}
           >
             <Icon className="h-5 w-5" aria-hidden="true" />
             {label}
@@ -1350,7 +1357,7 @@ function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
         onClick={onOpenMenu}
         aria-label="Open more navigation options"
         aria-current={moreActive ? 'page' : undefined}
-        className={`flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${moreActive ? 'bg-indigo-50 text-[#6366F1]' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
+        className={`mobile-nav-item touch-manipulation flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${moreActive ? 'bg-indigo-50 text-[#6366F1]' : 'text-gray-500'}`}
       >
         <Menu className="h-5 w-5" aria-hidden="true" />
         More
@@ -2872,21 +2879,19 @@ function KanbanView({ leads, onDragEnd, onEditLead }) {
           const stageLeads = leads.filter(l => l.stage === stage.id);
           return (
             <div key={stage.id} className="flex flex-col">
-              <div className="mb-4">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
+              <div className="mb-3 flex min-h-24 flex-col justify-between rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                <div className="flex min-w-0 items-start gap-2">
                   <div
-                    className="w-3 h-3 rounded-full"
+                    className="mt-1 h-3 w-3 shrink-0 rounded-full"
                     style={{ backgroundColor: stage.color }}
                   />
-                  <h3 className="font-semibold text-gray-900">
+                  <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-gray-900">
                     {stage.label}
                   </h3>
-                  <span className="text-sm text-gray-500">
-                    ({stageLeads.length})
-                  </span>
-                  </div>
-                  <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-500 shadow-sm">{stageLeads.length === 1 ? '1 lead' : `${stageLeads.length} leads`}</span>
+                </div>
+                <div className="mt-3 flex items-baseline justify-between border-t border-gray-100 pt-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Leads</span>
+                  <span className="text-2xl font-bold leading-none text-gray-900" aria-label={`${stageLeads.length} ${stageLeads.length === 1 ? 'lead' : 'leads'}`}>{stageLeads.length}</span>
                 </div>
               </div>
 
