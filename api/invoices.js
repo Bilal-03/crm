@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from '../server/db.js';
 import { getPagination, getRequiredId, HttpError, json, noContent, paginated, withApiRoute } from '../server/http.js';
 import { calculateInvoiceTotals, validateInvoice } from '../server/validation.js';
+import { getPersonalWorkspace } from '../server/workspaces.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   async handler({ req, res, userId }) {
     const sql = getDb();
+    const workspace = await getPersonalWorkspace(sql, userId);
 
     if (req.method === 'GET') {
       const { limit, offset } = getPagination(req.query);
@@ -16,7 +18,7 @@ export default withApiRoute({
                subtotal, tax_rate, tax_amount, discount_amount, total_amount, amount_paid, balance_due,
                created_at, updated_at, paid_at
         FROM invoices
-        WHERE user_id = ${userId}
+        WHERE workspace_id = ${workspace.id}
         ORDER BY created_at DESC, id DESC
         LIMIT ${limit + 1} OFFSET ${offset}
       `;
@@ -25,18 +27,18 @@ export default withApiRoute({
 
     if (req.method === 'POST') {
       const input = validateInvoice(req.body);
-      await assertOwnedCustomer(sql, input.customer_id, userId);
+      await assertOwnedCustomer(sql, input.customer_id, workspace.id);
       const invoice = buildInvoice({
         ...input,
         invoice_number: createInvoiceNumber(),
       });
       const rows = await sql`
         INSERT INTO invoices (
-          user_id, customer_id, invoice_number, invoice_date, due_date, status, items, notes, terms,
+          workspace_id, user_id, customer_id, invoice_number, invoice_date, due_date, status, items, notes, terms,
           subtotal, tax_rate, tax_amount, discount_amount, total_amount, amount_paid, balance_due, paid_at
         )
         VALUES (
-          ${userId}, ${invoice.customer_id}, ${invoice.invoice_number}, ${invoice.invoice_date}, ${invoice.due_date},
+          ${workspace.id}, ${userId}, ${invoice.customer_id}, ${invoice.invoice_number}, ${invoice.invoice_date}, ${invoice.due_date},
           ${invoice.status}, ${JSON.stringify(invoice.items)}, ${invoice.notes ?? null}, ${invoice.terms ?? null},
           ${invoice.subtotal}, ${invoice.tax_rate}, ${invoice.tax_amount}, ${invoice.discount_amount},
           ${invoice.total_amount}, ${invoice.amount_paid}, ${invoice.balance_due}, ${invoice.paid_at}
@@ -56,7 +58,7 @@ export default withApiRoute({
         SELECT id, customer_id, invoice_number, invoice_date, due_date, status, items, notes, terms,
                subtotal, tax_rate, tax_amount, discount_amount, total_amount, amount_paid, balance_due,
                created_at, updated_at, paid_at
-        FROM invoices WHERE id = ${id} AND user_id = ${userId}
+        FROM invoices WHERE id = ${id} AND workspace_id = ${workspace.id}
       `;
       if (!existingRows[0]) throw new HttpError(404, 'not_found', 'Invoice not found.');
 
@@ -66,7 +68,7 @@ export default withApiRoute({
         ...updates,
         invoice_number: existing.invoice_number,
       });
-      if (updates.customer_id) await assertOwnedCustomer(sql, updates.customer_id, userId);
+      if (updates.customer_id) await assertOwnedCustomer(sql, updates.customer_id, workspace.id);
 
       const rows = await sql`
         UPDATE invoices SET
@@ -86,7 +88,7 @@ export default withApiRoute({
           balance_due = ${invoice.balance_due},
           paid_at = ${invoice.paid_at},
           updated_at = NOW()
-        WHERE id = ${id} AND user_id = ${userId}
+        WHERE id = ${id} AND workspace_id = ${workspace.id}
         RETURNING id, customer_id, invoice_number, invoice_date, due_date, status, items, notes, terms,
                   subtotal, tax_rate, tax_amount, discount_amount, total_amount, amount_paid, balance_due,
                   created_at, updated_at, paid_at
@@ -94,7 +96,7 @@ export default withApiRoute({
       return json(res, 200, { data: rows[0] });
     }
 
-    const deleted = await sql`DELETE FROM invoices WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
+    const deleted = await sql`DELETE FROM invoices WHERE id = ${id} AND workspace_id = ${workspace.id} RETURNING id`;
     if (!deleted[0]) throw new HttpError(404, 'not_found', 'Invoice not found.');
     return noContent(res);
   },
@@ -122,8 +124,8 @@ function buildInvoice(input) {
   };
 }
 
-async function assertOwnedCustomer(sql, customerId, userId) {
-  const rows = await sql`SELECT id FROM customers WHERE id = ${customerId} AND user_id = ${userId}`;
+async function assertOwnedCustomer(sql, customerId, workspaceId) {
+  const rows = await sql`SELECT id FROM customers WHERE id = ${customerId} AND workspace_id = ${workspaceId}`;
   if (!rows[0]) throw new HttpError(400, 'invalid_reference', 'Customer does not exist.');
 }
 

@@ -1,18 +1,20 @@
 import { getDb } from '../server/db.js';
 import { getPagination, getRequiredId, HttpError, json, noContent, paginated, withApiRoute } from '../server/http.js';
 import { validateLead } from '../server/validation.js';
+import { getPersonalWorkspace } from '../server/workspaces.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   async handler({ req, res, userId }) {
     const sql = getDb();
+    const workspace = await getPersonalWorkspace(sql, userId);
 
     if (req.method === 'GET') {
       const { limit, offset } = getPagination(req.query);
       const rows = await sql`
         SELECT id, name, company, email, phone, source, stage, notes, reminders, quote_items, created_at, updated_at
         FROM leads
-        WHERE user_id = ${userId}
+        WHERE workspace_id = ${workspace.id}
         ORDER BY created_at DESC, id DESC
         LIMIT ${limit + 1} OFFSET ${offset}
       `;
@@ -22,9 +24,9 @@ export default withApiRoute({
     if (req.method === 'POST') {
       const lead = validateLead(req.body);
       const rows = await sql`
-        INSERT INTO leads (user_id, name, company, email, phone, source, stage, notes, reminders, quote_items)
+        INSERT INTO leads (workspace_id, user_id, name, company, email, phone, source, stage, notes, reminders, quote_items)
         VALUES (
-          ${userId}, ${lead.name}, ${lead.company ?? null}, ${lead.email}, ${lead.phone ?? null},
+          ${workspace.id}, ${userId}, ${lead.name}, ${lead.company ?? null}, ${lead.email}, ${lead.phone ?? null},
           ${lead.source ?? null}, ${lead.stage}, ${JSON.stringify(lead.notes ?? [])},
           ${JSON.stringify(lead.reminders ?? [])}, ${JSON.stringify(lead.quote_items ?? [])}
         )
@@ -51,14 +53,14 @@ export default withApiRoute({
           reminders = CASE WHEN ${has('reminders')} THEN ${has('reminders') ? JSON.stringify(lead.reminders) : null}::jsonb ELSE reminders END,
           quote_items = CASE WHEN ${has('quote_items')} THEN ${has('quote_items') ? JSON.stringify(lead.quote_items) : null}::jsonb ELSE quote_items END,
           updated_at = NOW()
-        WHERE id = ${id} AND user_id = ${userId}
+        WHERE id = ${id} AND workspace_id = ${workspace.id}
         RETURNING id, name, company, email, phone, source, stage, notes, reminders, quote_items, created_at, updated_at
       `;
       if (!rows[0]) throw new HttpError(404, 'not_found', 'Lead not found.');
       return json(res, 200, { data: rows[0] });
     }
 
-    const deleted = await sql`DELETE FROM leads WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
+    const deleted = await sql`DELETE FROM leads WHERE id = ${id} AND workspace_id = ${workspace.id} RETURNING id`;
     if (!deleted[0]) throw new HttpError(404, 'not_found', 'Lead not found.');
     return noContent(res);
   },

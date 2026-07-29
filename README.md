@@ -45,14 +45,14 @@ CRM Pro is a full-stack React application designed for small teams that need one
                        ▼
 ┌──────────────────────────────────────────────┐
 │ Neon PostgreSQL                              │
-│ Tenant-scoped leads, meetings, customers,    │
+│ Workspace-scoped leads, meetings, customers, │
 │ activities, invoices, and relationships      │
 └──────────────────────────────────────────────┘
 
 Invoice email: API → Resend
 ```
 
-The API derives the authenticated user from the verified Clerk token. The browser never supplies its own `user_id`, and all database queries are tenant-scoped. Relationship writes verify ownership before creating meetings or invoices.
+The API derives the authenticated user from the verified Clerk token. The browser never supplies its own `user_id`, and all database queries are scoped to the caller's personal workspace. Every account receives a personal workspace automatically, while `workspace_members` provides the foundation for future owner, admin, and member access. Relationship writes verify that records belong to the active workspace before creating meetings or invoices.
 
 ## Repository layout
 
@@ -105,10 +105,11 @@ For a new database:
 psql "$NEON_DATABASE_URL" -f schema.sql
 ```
 
-For an existing database created from the original prototype schema, create a backup and apply the reviewed migration:
+For an existing database created from the original prototype schema, create a backup and apply the reviewed migrations in order:
 
 ```bash
 psql "$NEON_DATABASE_URL" -f migrations/002_production_hardening.sql
+psql "$NEON_DATABASE_URL" -f migrations/003_workspace_foundation.sql
 ```
 
 ### 4. Start the application
@@ -187,7 +188,7 @@ The project is configured for Vercel deployment.
 2. Select the `main` branch for production deployments.
 3. Add every variable from `.env.example` to the Vercel project settings.
 4. Set `CLERK_AUTHORIZED_PARTIES` to the exact production origin.
-5. Apply `schema.sql` or the appropriate migration before the first production request.
+5. Apply `schema.sql` for a new database, or apply every reviewed migration in order before deploying API changes.
 6. Configure a verified Resend sender if invoice email is enabled.
 7. Deploy and verify sign-in, one CRUD flow per resource, tenant isolation, PDF generation, and invoice delivery.
 

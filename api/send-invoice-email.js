@@ -2,6 +2,7 @@ import { Resend } from 'resend';
 
 import { getDb } from '../server/db.js';
 import { getRequiredId, HttpError, json, withApiRoute } from '../server/http.js';
+import { getPersonalWorkspace } from '../server/workspaces.js';
 
 const MAX_PDF_BYTES = 3 * 1024 * 1024;
 
@@ -16,11 +17,12 @@ export default withApiRoute({
     const invoiceId = getRequiredId({ id: req.body?.invoiceId });
     const pdf = decodePdf(req.body?.pdfBase64);
     const sql = getDb();
+    const workspace = await getPersonalWorkspace(sql, userId);
     const rows = await sql`
       SELECT i.invoice_number, i.total_amount, i.due_date, c.name, c.email
       FROM invoices i
-      JOIN customers c ON c.id = i.customer_id AND c.user_id = i.user_id
-      WHERE i.id = ${invoiceId} AND i.user_id = ${userId}
+      JOIN customers c ON c.id = i.customer_id AND c.workspace_id = i.workspace_id
+      WHERE i.id = ${invoiceId} AND i.workspace_id = ${workspace.id}
     `;
     const invoice = rows[0];
     if (!invoice) throw new HttpError(404, 'not_found', 'Invoice not found.');

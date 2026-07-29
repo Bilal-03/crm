@@ -3,8 +3,26 @@
 
 BEGIN;
 
+CREATE TABLE workspaces (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_user_id TEXT NOT NULL UNIQUE,
+  name VARCHAR(160) NOT NULL DEFAULT 'Personal CRM',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE workspace_members (
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  role VARCHAR(16) NOT NULL DEFAULT 'member'
+    CHECK (role IN ('owner', 'admin', 'member')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (workspace_id, user_id)
+);
+
 CREATE TABLE leads (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   name VARCHAR(160) NOT NULL CHECK (length(trim(name)) > 0),
   company VARCHAR(160),
@@ -18,11 +36,12 @@ CREATE TABLE leads (
   quote_items JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(quote_items) = 'array'),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (id, user_id)
+  UNIQUE (id, workspace_id)
 );
 
 CREATE TABLE meetings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   lead_id UUID,
   title VARCHAR(200) NOT NULL CHECK (length(trim(title)) > 0),
@@ -30,12 +49,13 @@ CREATE TABLE meetings (
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT meetings_tenant_lead_fk FOREIGN KEY (lead_id, user_id)
-    REFERENCES leads (id, user_id) ON DELETE CASCADE
+  CONSTRAINT meetings_workspace_lead_fk FOREIGN KEY (lead_id, workspace_id)
+    REFERENCES leads (id, workspace_id) ON DELETE CASCADE
 );
 
 CREATE TABLE activities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   lead_id UUID REFERENCES leads(id) ON DELETE SET NULL,
   type VARCHAR(80) NOT NULL CHECK (length(trim(type)) > 0),
@@ -45,6 +65,7 @@ CREATE TABLE activities (
 
 CREATE TABLE customers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   name VARCHAR(160) NOT NULL CHECK (length(trim(name)) > 0),
   company VARCHAR(160),
@@ -52,13 +73,14 @@ CREATE TABLE customers (
   phone VARCHAR(40),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (id, user_id)
+  UNIQUE (id, workspace_id)
 );
 
-CREATE UNIQUE INDEX customers_user_email_unique_idx ON customers (user_id, lower(email));
+CREATE UNIQUE INDEX customers_workspace_email_unique_idx ON customers (workspace_id, lower(email));
 
 CREATE TABLE invoices (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   customer_id UUID NOT NULL,
   invoice_number VARCHAR(64) NOT NULL,
@@ -79,17 +101,17 @@ CREATE TABLE invoices (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   paid_at TIMESTAMPTZ,
-  CONSTRAINT invoices_tenant_customer_fk FOREIGN KEY (customer_id, user_id)
-    REFERENCES customers (id, user_id) ON DELETE RESTRICT,
-  UNIQUE (user_id, invoice_number)
+  CONSTRAINT invoices_workspace_customer_fk FOREIGN KEY (customer_id, workspace_id)
+    REFERENCES customers (id, workspace_id) ON DELETE RESTRICT,
+  UNIQUE (workspace_id, invoice_number)
 );
 
-CREATE INDEX leads_user_created_idx ON leads (user_id, created_at DESC, id DESC);
-CREATE INDEX leads_user_stage_idx ON leads (user_id, stage, created_at DESC);
-CREATE INDEX meetings_user_date_idx ON meetings (user_id, date_time, id);
-CREATE INDEX activities_user_timestamp_idx ON activities (user_id, timestamp DESC, id DESC);
-CREATE INDEX customers_user_created_idx ON customers (user_id, created_at DESC, id DESC);
-CREATE INDEX invoices_user_created_idx ON invoices (user_id, created_at DESC, id DESC);
-CREATE INDEX invoices_user_status_due_idx ON invoices (user_id, status, due_date);
+CREATE INDEX leads_workspace_created_idx ON leads (workspace_id, created_at DESC, id DESC);
+CREATE INDEX leads_workspace_stage_idx ON leads (workspace_id, stage, created_at DESC);
+CREATE INDEX meetings_workspace_date_idx ON meetings (workspace_id, date_time, id);
+CREATE INDEX activities_workspace_timestamp_idx ON activities (workspace_id, timestamp DESC, id DESC);
+CREATE INDEX customers_workspace_created_idx ON customers (workspace_id, created_at DESC, id DESC);
+CREATE INDEX invoices_workspace_created_idx ON invoices (workspace_id, created_at DESC, id DESC);
+CREATE INDEX invoices_workspace_status_due_idx ON invoices (workspace_id, status, due_date);
 
 COMMIT;
