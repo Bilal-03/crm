@@ -1167,6 +1167,7 @@ export default function CRMApp() {
                 activeWorkspaceId={activeWorkspaceId || teamData?.workspace?.id}
                 onSelectWorkspace={setActiveWorkspaceId}
                 onInvite={(email, role) => manageTeam({ action: 'invite', email, role })}
+                onRename={(name) => manageTeam({ action: 'rename', name })}
                 onChangeRole={(userId, role) => manageTeam({ action: 'role', userId, role })}
                 onRemove={(userId) => manageTeam({ action: 'remove', userId })}
                 onRevoke={(invitationId) => manageTeam({ action: 'revoke', invitationId })}
@@ -1270,7 +1271,6 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
     { id: 'clients', icon: Target, label: 'Clients' },
     { id: 'pipeline', icon: Activity, label: 'Pipeline' },
     { id: 'reports', icon: BarChart3, label: 'Reports' },
-    { id: 'team', icon: Settings, label: 'Team Settings' },
     { id: 'invoices', icon: FileText, label: 'Invoices' },
     { id: 'meetings', icon: Calendar, label: 'Meetings' }
   ];
@@ -1326,6 +1326,15 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut }) {
       </nav>
 
       <div className="mb-[calc(4.5rem+env(safe-area-inset-bottom))] shrink-0 border-t border-gray-200 p-4 lg:mb-0">
+        <button
+          type="button"
+          onClick={() => onNavigate('team')}
+          aria-current={currentPage === 'team' ? 'page' : undefined}
+          className={`mb-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 font-medium transition-all ${currentPage === 'team' ? 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white shadow-lg shadow-[#6366F1]/30' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+        >
+          <Settings className="h-5 w-5 shrink-0" />
+          {open && <span>Team Settings</span>}
+        </button>
         <button
           onClick={onSignOut}
           aria-label={open ? undefined : 'Sign out'}
@@ -1392,8 +1401,8 @@ function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
     { id: 'dashboard', label: 'Home', icon: Home },
     { id: 'leads', label: 'Leads', icon: Users },
     { id: 'pipeline', label: 'Pipeline', icon: Activity },
+    { id: 'reports', label: 'Reports', icon: BarChart3 },
   ];
-  const moreActive = !items.some(item => item.id === currentPage);
 
   return (
     <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-50 flex border-t border-gray-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
@@ -1412,16 +1421,6 @@ function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
           </button>
         );
       })}
-      <button
-        type="button"
-        onClick={onOpenMenu}
-        aria-label="Open more navigation options"
-        aria-current={moreActive ? 'page' : undefined}
-        className={`mobile-nav-item touch-manipulation flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${moreActive ? 'bg-indigo-50 text-[#6366F1]' : 'text-gray-500'}`}
-      >
-        <Menu className="h-5 w-5" aria-hidden="true" />
-        More
-      </button>
     </nav>
   );
 }
@@ -2334,9 +2333,10 @@ function ReportsPage({ leads, invoices, meetings }) {
   );
 }
 
-function TeamSettingsPage({ user, teamData, receivedInvitations, activeWorkspaceId, onSelectWorkspace, onInvite, onChangeRole, onRemove, onRevoke, onAccept }) {
+function TeamSettingsPage({ user, teamData, receivedInvitations, activeWorkspaceId, onSelectWorkspace, onInvite, onRename, onChangeRole, onRemove, onRevoke, onAccept }) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('member');
+  const [workspaceName, setWorkspaceName] = useState(teamData?.workspace?.name || '');
   const [saving, setSaving] = useState(false);
   const workspace = teamData?.workspace;
   const canManage = ['owner', 'admin'].includes(workspace?.role);
@@ -2348,6 +2348,8 @@ function TeamSettingsPage({ user, teamData, receivedInvitations, activeWorkspace
     try { await onInvite(email, role); setEmail(''); } finally { setSaving(false); }
   };
 
+  useEffect(() => setWorkspaceName(teamData?.workspace?.name || ''), [teamData?.workspace?.name]);
+
   if (!teamData) return <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-gray-500">Loading team settings…</div>;
 
   return (
@@ -2355,7 +2357,7 @@ function TeamSettingsPage({ user, teamData, receivedInvitations, activeWorkspace
       <PageHeader title="Team Settings" description={`Manage access to ${workspace.name}.`} />
       {teamData.workspaces.length > 1 && <label className="block md:hidden"><span className="mb-2 block text-sm font-semibold text-gray-700">Active workspace</span><select value={activeWorkspaceId || ''} onChange={event => onSelectWorkspace(event.target.value)} className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700">{teamData.workspaces.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
       {receivedInvitations.length > 0 && <section className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5"><h2 className="text-lg font-bold text-indigo-950">Workspace invitations</h2><div className="mt-3 space-y-3">{receivedInvitations.map(invite => <div key={invite.id} className="flex flex-col gap-3 rounded-xl bg-white p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-gray-900">Join {invite.workspace_name}</p><p className="text-sm text-gray-500">Role: {invite.role}</p></div><button type="button" onClick={() => onAccept(invite.id)} className="rounded-lg bg-[#6366F1] px-4 py-2 text-sm font-semibold text-white">Accept invitation</button></div>)}</div></section>}
-      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><div className="flex items-center gap-3"><div className="rounded-xl bg-indigo-50 p-3 text-[#6366F1]"><Shield className="h-6 w-6" /></div><div><h2 className="font-bold text-gray-900">{workspace.name}</h2><p className="text-sm text-gray-500">Your role: <span className="capitalize font-semibold">{workspace.role}</span></p></div></div></section>
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><div className="flex items-center gap-3"><div className="rounded-xl bg-indigo-50 p-3 text-[#6366F1]"><Shield className="h-6 w-6" /></div><div><h2 className="font-bold text-gray-900">{workspace.name}</h2><p className="text-sm text-gray-500">Your role: <span className="capitalize font-semibold">{workspace.role}</span></p></div></div>{isOwner && <form onSubmit={async event => { event.preventDefault(); await onRename(workspaceName); }} className="mt-5 flex flex-col gap-2 border-t border-gray-100 pt-4 sm:flex-row"><label className="sr-only" htmlFor="workspace-name">Workspace name</label><input id="workspace-name" value={workspaceName} onChange={event => setWorkspaceName(event.target.value)} className="min-h-11 flex-1 rounded-lg border border-gray-300 px-3" /><button className="min-h-11 rounded-lg border border-indigo-200 bg-indigo-50 px-4 text-sm font-semibold text-[#6366F1]">Save name</button></form>}</section>
       {canManage && <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-bold text-gray-900">Invite a teammate</h2><p className="mt-1 text-sm text-gray-500">They can accept the invite after creating or signing into their CRM account.</p><form onSubmit={invite} className="mt-4 flex flex-col gap-3 sm:flex-row"><input required type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="teammate@company.com" className="min-h-11 flex-1 rounded-lg border border-gray-300 px-3" /><select value={role} onChange={event => setRole(event.target.value)} className="min-h-11 rounded-lg border border-gray-300 px-3"><option value="member">Member</option><option value="admin">Admin</option></select><button disabled={saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#6366F1] px-4 text-sm font-semibold text-white disabled:opacity-50"><UserPlus className="h-4 w-4" />Invite</button></form></section>}
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"><div className="border-b border-gray-200 p-5"><h2 className="text-lg font-bold text-gray-900">Members</h2></div><div className="divide-y divide-gray-100">{teamData.members.map(member => <div key={member.user_id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-gray-900">{member.email || (member.user_id === user.id ? user.primaryEmailAddress?.emailAddress : 'Workspace member')}</p><p className="text-sm capitalize text-gray-500">{member.role}</p></div>{member.role !== 'owner' && canManage && <div className="flex gap-2">{isOwner && <select value={member.role} onChange={event => onChangeRole(member.user_id, event.target.value)} className="rounded-lg border border-gray-300 px-2 py-2 text-sm"><option value="admin">Admin</option><option value="member">Member</option></select>}<button type="button" onClick={() => onRemove(member.user_id)} className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-600"><UserMinus className="h-4 w-4" />Remove</button></div>}</div>)}</div></section>
       {canManage && teamData.invitations.length > 0 && <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-bold text-gray-900">Pending invitations</h2><div className="mt-3 space-y-3">{teamData.invitations.map(invite => <div key={invite.id} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 p-3"><div><p className="font-medium text-gray-900">{invite.email}</p><p className="text-xs capitalize text-gray-500">{invite.role} · expires {new Date(invite.expires_at).toLocaleDateString()}</p></div><button type="button" onClick={() => onRevoke(invite.id)} className="text-sm font-semibold text-red-600">Revoke</button></div>)}</div></section>}

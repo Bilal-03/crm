@@ -31,6 +31,7 @@ export default withApiRoute({
     requireManager(workspace.role);
 
     if (body.action === 'invite') return json(res, 201, { data: await createInvitation(sql, workspace.id, userId, body) });
+    if (body.action === 'rename') return json(res, 200, { data: await renameWorkspace(sql, workspace, body.name) });
     if (body.action === 'role') return json(res, 200, { data: await updateRole(sql, workspace, body) });
     if (body.action === 'remove') return json(res, 200, { data: await removeMember(sql, workspace, body) });
     if (body.action === 'revoke') return json(res, 200, { data: await revokeInvitation(sql, workspace.id, body.invitationId) });
@@ -40,6 +41,14 @@ export default withApiRoute({
 
 function requireManager(role) {
   if (!['owner', 'admin'].includes(role)) throw new HttpError(403, 'team_permission_denied', 'Only workspace owners and admins can manage the team.');
+}
+
+async function renameWorkspace(sql, workspace, value) {
+  if (workspace.role !== 'owner') throw new HttpError(403, 'team_permission_denied', 'Only the workspace owner can rename the workspace.');
+  const name = typeof value === 'string' ? value.trim() : '';
+  if (name.length < 2 || name.length > 160) throw new HttpError(400, 'validation_error', 'Workspace name must be between 2 and 160 characters.');
+  const rows = await sql`UPDATE workspaces SET name = ${name}, updated_at = NOW() WHERE id = ${workspace.id} RETURNING id, name`;
+  return rows[0];
 }
 
 function email(value) {
