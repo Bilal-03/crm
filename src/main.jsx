@@ -6,7 +6,8 @@ import { ClerkProvider } from '@clerk/clerk-react'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-const isProductionTestKey = import.meta.env.PROD && PUBLISHABLE_KEY?.startsWith('pk_test_')
+const clerkDeploymentMode = (import.meta.env.VITE_CLERK_DEPLOYMENT_MODE || 'production').trim().toLowerCase()
+const isProductionTestKey = clerkDeploymentMode !== 'development' && PUBLISHABLE_KEY?.startsWith('pk_test_')
 
 const root = ReactDOM.createRoot(document.getElementById('root'))
 

@@ -139,7 +139,9 @@ Open the local Vite URL shown in the terminal, normally `http://localhost:5173`.
 
 | Variable | Required | Purpose |
 | --- | ---: | --- |
+| `VITE_CLERK_DEPLOYMENT_MODE` | No | Set to `development` only for a deliberate non-production deployment |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Yes | Safe Clerk browser publishable key |
+| `CLERK_DEPLOYMENT_MODE` | No | Server-side deployment mode; defaults safely to production when deployed |
 | `CLERK_SECRET_KEY` | Yes | Server-side Clerk token verification |
 | `CLERK_JWT_KEY` | No | Optional PEM key for networkless verification |
 | `CLERK_AUTHORIZED_PARTIES` | Yes in production | Exact allowed frontend origin(s) |
@@ -149,7 +151,7 @@ Open the local Vite URL shown in the terminal, normally `http://localhost:5173`.
 
 Use `.env.example` as the canonical variable list. Keep `.env`, `.env.local`, and production secret values out of Git.
 
-For local development, test Clerk keys (`pk_test_…` and `sk_test_…`) are expected. For the deployed production URL, configure a production Clerk instance with `pk_live_…` and `sk_live_…`, a verified Clerk production domain, and `CLERK_AUTHORIZED_PARTIES` set to the exact HTTPS origin (currently `https://crm-sepia-chi-24.vercel.app`). Do not commit either key. A test-key deployment is a release blocker.
+For local development or a deliberately non-production personal deployment, set both deployment-mode variables to `development` and use test Clerk keys (`pk_test_…` and `sk_test_…`). This mode is not suitable for sensitive data or a production release. For a real production deployment, leave the mode variables unset or set them to `production`, use `pk_live_…` and `sk_live_…`, configure a verified Clerk production domain, and set `CLERK_AUTHORIZED_PARTIES` to the exact HTTPS origin. Do not commit either key.
 
 ## Available commands
 

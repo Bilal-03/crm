@@ -5,6 +5,14 @@ import { verifyToken } from '@clerk/backend';
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 const DEFAULT_BODY_LIMIT = 128 * 1024;
 
+export function isProductionDeployment(env = process.env) {
+  const configuredMode = typeof env.CLERK_DEPLOYMENT_MODE === 'string'
+    ? env.CLERK_DEPLOYMENT_MODE.trim().toLowerCase()
+    : '';
+  if (configuredMode) return configuredMode !== 'development';
+  return env.VERCEL_ENV === 'production' || env.NODE_ENV === 'production';
+}
+
 export class HttpError extends Error {
   constructor(statusCode, code, message, details) {
     super(message);
@@ -186,7 +194,7 @@ async function authenticate(req) {
     throw new Error('CLERK_SECRET_KEY or CLERK_JWT_KEY must be configured.');
   }
 
-  const isProduction = process.env.VERCEL_ENV === 'production' || process.env.NODE_ENV === 'production';
+  const isProduction = isProductionDeployment();
   if (isProduction && secretKey?.startsWith('sk_test_')) {
     throw new Error('Production Clerk authentication must use a live secret key.');
   }

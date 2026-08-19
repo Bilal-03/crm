@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { buildInvoice, isInvoiceDeletable } from '../../api/invoices.js';
 import { calculateInvoiceTotals, validateBulkLeadOperation, validateInvoice } from '../../server/validation.js';
+import { isProductionDeployment } from '../../server/http.js';
 import { calculateReportMetrics, getReportWindow } from '../../server/reporting.js';
 import { createPhase0Fixtures } from '../fixtures/phase0-fixtures.js';
 
@@ -80,4 +81,18 @@ test('report metrics use close and payment dates instead of creation dates', () 
   assert.equal(metrics.revenueCollected, 1500);
   assert.equal(metrics.paidInvoices, 1);
   assert.equal(metrics.meetingsScheduled, 1);
+});
+
+test('development deployment mode explicitly permits test-key deployments', () => {
+  assert.equal(isProductionDeployment({
+    CLERK_DEPLOYMENT_MODE: 'development',
+    VERCEL_ENV: 'production',
+    NODE_ENV: 'production',
+  }), false);
+  assert.equal(isProductionDeployment({
+    CLERK_DEPLOYMENT_MODE: 'production',
+    VERCEL_ENV: 'preview',
+    NODE_ENV: 'production',
+  }), true);
+  assert.equal(isProductionDeployment({ VERCEL_ENV: 'production' }), true);
 });
