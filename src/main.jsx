@@ -1,9 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import CRMApp from '../crm-system.jsx'
 import './index.css'
 import { ClerkProvider } from '@clerk/clerk-react'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
+import AppRouter from './app/AppRouter.jsx'
+import { AppProviders } from './app/AppProviders.jsx'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 const clerkDeploymentMode = (import.meta.env.VITE_CLERK_DEPLOYMENT_MODE || 'production').trim().toLowerCase()
@@ -15,9 +16,11 @@ root.render(
   <React.StrictMode>
     {PUBLISHABLE_KEY && !isProductionTestKey ? (
       <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
-        <ErrorBoundary>
-          <CRMApp />
-        </ErrorBoundary>
+        <AppProviders>
+          <ErrorBoundary>
+            <AppRouter />
+          </ErrorBoundary>
+        </AppProviders>
       </ClerkProvider>
     ) : (
       <main className="min-h-screen grid place-items-center bg-gray-50 p-6">

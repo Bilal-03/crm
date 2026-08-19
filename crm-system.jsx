@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, 
   ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area 
@@ -61,6 +63,10 @@ if (typeof document !== 'undefined') {
 
 import { useAuth, useClerk, useUser, SignIn } from '@clerk/clerk-react';
 import { createApiClient, fetchAllPages } from './src/lib/api-client.js';
+import { pageFromPathname, pathForPage } from './src/app/routes.js';
+import { AppShell } from './src/components/layout/AppShell.jsx';
+import { ConfirmDialog } from './src/components/ui/ConfirmDialog.jsx';
+import { EmptyState } from './src/components/ui/EmptyState.jsx';
 
 let pdfLibrariesPromise;
 const loadPdfLibraries = () => {
@@ -375,13 +381,16 @@ export default function CRMApp() {
   const { user, isLoaded, isSignedIn } = useUser();
   const { getToken } = useAuth();
   const { signOut } = useClerk();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(true);
 
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null);
   const api = useMemo(() => createApiClient(getToken, { workspaceId: activeWorkspaceId }), [getToken, activeWorkspaceId]);
   const fetchApi = api.request;
 
-  const [currentPage, setCurrentPage] = useState('dashboard');
+  const currentPage = pageFromPathname(location.pathname);
   const isMobile = useIsMobile();
   // Keep the desktop sidebar expanded, but never show the mobile drawer until
   // the user explicitly opens it from the header menu.
@@ -400,10 +409,7 @@ export default function CRMApp() {
   const [activities, setActivities] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [customerRecords, setCustomerRecords] = useState([]);
-  const [dashboardData, setDashboardData] = useState(null);
   const [dashboardTrendRange, setDashboardTrendRange] = useState('7');
-  const [reportData, setReportData] = useState(null);
-  const [reportLoading, setReportLoading] = useState(false);
   const [reportRangeDays, setReportRangeDays] = useState(30);
   
   // UI states
@@ -420,12 +426,31 @@ export default function CRMApp() {
   const [toast, setToast] = useState(null);
   const [teamData, setTeamData] = useState(null);
   const [receivedInvitations, setReceivedInvitations] = useState([]);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const confirmResolverRef = useRef(null);
 
   const notify = (message, type = 'success') => {
     setToast({ message, type });
   };
 
-  const invalidateDashboard = () => setDashboardData(null);
+  const requestConfirm = useCallback((options) => new Promise(resolve => {
+    confirmResolverRef.current?.(false);
+    confirmResolverRef.current = resolve;
+    setConfirmDialog(options);
+  }), []);
+
+  const resolveConfirm = useCallback((accepted) => {
+    const resolve = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    setConfirmDialog(null);
+    resolve?.(accepted);
+  }, []);
+
+  const invalidateDashboard = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: ['dashboard', activeWorkspaceId || 'default'],
+    });
+  }, [activeWorkspaceId, queryClient]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -465,7 +490,6 @@ export default function CRMApp() {
   // 2. Fetch Data Helper (With Data Mapping)
   const fetchData = async (userId) => {
     setLoading(true);
-    setDashboardData(null);
     try {
       const resources = ['leads', 'meetings', 'activities', 'invoices', 'customers'];
       const results = await Promise.allSettled([
@@ -520,39 +544,36 @@ export default function CRMApp() {
     }
   };
 
-  useEffect(() => {
-    if (!user || currentPage !== 'dashboard') return undefined;
-    let cancelled = false;
-    fetchApi(`/dashboard?trendDays=${dashboardTrendRange}`)
-      .then(result => {
-        if (!cancelled) setDashboardData(result);
-      })
-      .catch(error => {
-        if (!cancelled) console.error('Error loading dashboard aggregates:', error);
-      });
-    return () => { cancelled = true; };
-  }, [user, activeWorkspaceId, currentPage, dashboardTrendRange, fetchApi]);
+  const dashboardQuery = useQuery({
+    queryKey: ['dashboard', activeWorkspaceId || 'default', dashboardTrendRange],
+    queryFn: () => fetchApi(`/dashboard?trendDays=${dashboardTrendRange}`),
+    enabled: Boolean(user && currentPage === 'dashboard'),
+    staleTime: 30_000,
+  });
+
+  const reportQuery = useQuery({
+    queryKey: ['reports', activeWorkspaceId || 'default', reportRangeDays],
+    queryFn: () => fetchApi(`/reports?rangeDays=${reportRangeDays}`),
+    enabled: Boolean(user && currentPage === 'reports'),
+    staleTime: 30_000,
+  });
+
+  const dashboardData = dashboardQuery.data ?? null;
+  const reportData = reportQuery.data ?? null;
+  const reportLoading = reportQuery.isPending || reportQuery.isFetching;
 
   useEffect(() => {
-    if (!user || currentPage !== 'reports') return undefined;
-    let cancelled = false;
-    setReportData(null);
-    setReportLoading(true);
-    fetchApi(`/reports?rangeDays=${reportRangeDays}`)
-      .then(result => {
-        if (!cancelled) setReportData(result);
-      })
-      .catch(error => {
-        if (!cancelled) {
-          console.error('Error loading reports:', error);
-          notify(error.message || 'Reports could not be loaded.', 'error');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setReportLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [user, activeWorkspaceId, currentPage, reportRangeDays, fetchApi]);
+    if (dashboardQuery.error) {
+      console.error('Error loading dashboard aggregates:', dashboardQuery.error);
+    }
+  }, [dashboardQuery.error]);
+
+  useEffect(() => {
+    if (reportQuery.error) {
+      console.error('Error loading reports:', reportQuery.error);
+      notify(reportQuery.error.message || 'Reports could not be loaded.', 'error');
+    }
+  }, [reportQuery.error]);
 
   const refreshTeam = async () => {
     try {
@@ -1076,40 +1097,38 @@ export default function CRMApp() {
   }
 
   const navigateTo = (page) => {
-    setCurrentPage(page);
+    navigate(pathForPage(page));
     if (isMobile) setSidebarOpen(false);
   };
 
   return (
-    <div className="flex h-screen overflow-hidden font-sans bg-gray-50 text-gray-900">
-      {/* Sidebar */}
-      <Sidebar 
-        open={sidebarOpen}
-        mobile={isMobile}
-        currentPage={currentPage}
-        onNavigate={navigateTo}
-        workspaces={teamData?.workspaces || []}
-        activeWorkspaceId={activeWorkspaceId || teamData?.workspace?.id}
-        onSelectWorkspace={(workspaceId) => {
-          setActiveWorkspaceId(workspaceId);
-          if (isMobile) setSidebarOpen(false);
-        }}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
-        onSignOut={signOut}
-      />
-      {isMobile && sidebarOpen && (
+    <AppShell
+      sidebar={(
+        <Sidebar
+          open={sidebarOpen}
+          mobile={isMobile}
+          currentPage={currentPage}
+          onNavigate={navigateTo}
+          workspaces={teamData?.workspaces || []}
+          activeWorkspaceId={activeWorkspaceId || teamData?.workspace?.id}
+          onSelectWorkspace={(workspaceId) => {
+            setActiveWorkspaceId(workspaceId);
+            if (isMobile) setSidebarOpen(false);
+          }}
+          onToggle={() => setSidebarOpen(!sidebarOpen)}
+          onSignOut={signOut}
+        />
+      )}
+      sidebarOverlay={isMobile && sidebarOpen ? (
         <button
           type="button"
           aria-label="Close navigation menu"
           onClick={() => setSidebarOpen(false)}
           className="fixed inset-0 z-30 bg-gray-950/40 lg:hidden"
         />
-      )}
-
-      {/* Main Content */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <Header 
+      ) : null}
+      header={(
+        <Header
           user={user}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           overdueCount={stats.overdueReminders}
@@ -1118,9 +1137,15 @@ export default function CRMApp() {
           activeWorkspaceId={activeWorkspaceId || teamData?.workspace?.id}
           onSelectWorkspace={setActiveWorkspaceId}
         />
-
-        {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-8">
+      )}
+      mobileNav={(
+        <MobileBottomNav
+          currentPage={currentPage}
+          onNavigate={navigateTo}
+          onOpenMenu={() => setSidebarOpen(true)}
+        />
+      )}
+    >
           {dataLoadErrors.length > 0 && (
             <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
               <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
@@ -1172,6 +1197,7 @@ export default function CRMApp() {
                 onDeleteLead={deleteLead}
                 onBulkUpdateStage={bulkUpdateLeads}
                 onBulkDelete={bulkDeleteLeads}
+                onRequestConfirm={requestConfirm}
                 onExport={() => exportToCSV(filteredLeads, 'leads.csv')}
               />
             )}
@@ -1213,6 +1239,7 @@ export default function CRMApp() {
                   setShowMeetingModal(true);
                 }}
                 onDeleteMeeting={deleteMeeting}
+                onRequestConfirm={requestConfirm}
               />
             )}
 
@@ -1229,6 +1256,7 @@ export default function CRMApp() {
                   setShowInvoiceModal(true);
                 }}
                 onDeleteInvoice={deleteInvoice}
+                onRequestConfirm={requestConfirm}
                 onSendInvoice={(invoice, customer) => sendInvoiceEmail(invoice, customer, getToken)}
                 onNotify={notify}
               />
@@ -1262,15 +1290,6 @@ export default function CRMApp() {
               />
             )}
           </AnimatePresence>
-        </main>
-      </div>
-
-      <MobileBottomNav
-        currentPage={currentPage}
-        onNavigate={navigateTo}
-        onOpenMenu={() => setSidebarOpen(true)}
-      />
-
       {/* Modals */}
       {showLeadModal && (
         <LeadModal 
@@ -1341,8 +1360,18 @@ export default function CRMApp() {
         />
       )}
 
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        description={confirmDialog?.description}
+        confirmLabel={confirmDialog?.confirmLabel}
+        cancelLabel={confirmDialog?.cancelLabel}
+        onConfirm={() => resolveConfirm(true)}
+        onCancel={() => resolveConfirm(false)}
+      />
+
       <Toast toast={toast} onDismiss={() => setToast(null)} />
-    </div>
+    </AppShell>
   );
 }
 
@@ -2509,6 +2538,7 @@ function LeadsPage({
   onDeleteLead,
   onBulkUpdateStage,
   onBulkDelete,
+  onRequestConfirm,
   onExport
 }) {
   const [sourceFilter, setSourceFilter] = useState('all');
@@ -2606,7 +2636,24 @@ function LeadsPage({
               <option value="">Move to stage…</option>
               {PIPELINE_STAGES.map(stage => <option key={stage.id} value={stage.id}>{stage.label}</option>)}
             </select>
-            <button type="button" onClick={() => { if (confirm(`Delete ${selectedIds.length} selected lead${selectedIds.length === 1 ? '' : 's'}?`)) { onBulkDelete(selectedIds); clearSelection(); } }} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">Delete</button>
+            <button
+              type="button"
+              onClick={() => {
+                void onRequestConfirm({
+                  title: `Delete ${selectedIds.length} selected lead${selectedIds.length === 1 ? '' : 's'}?`,
+                  description: 'This action cannot be undone.',
+                  confirmLabel: 'Delete leads',
+                }).then(confirmed => {
+                  if (confirmed) {
+                    onBulkDelete(selectedIds);
+                    clearSelection();
+                  }
+                });
+              }}
+              className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+            >
+              Delete
+            </button>
             <button type="button" onClick={clearSelection} className="rounded-lg px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100">Clear</button>
           </div>
         </div>
@@ -2751,9 +2798,13 @@ function LeadsPage({
                         </button>
                         <button
                           onClick={() => {
-                            if (confirm('Are you sure you want to delete this lead?')) {
-                              onDeleteLead(lead.id);
-                            }
+                            void onRequestConfirm({
+                              title: 'Delete this lead?',
+                              description: `Delete ${lead.name}? This action cannot be undone.`,
+                              confirmLabel: 'Delete lead',
+                            }).then(confirmed => {
+                              if (confirmed) onDeleteLead(lead.id);
+                            });
                           }}
                           className="p-2 hover:bg-red-50 rounded-lg transition-colors text-red-500"
                           title="Delete Lead"
@@ -2794,7 +2845,21 @@ function LeadsPage({
               <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
                 <button type="button" onClick={() => onViewLead(lead)} className="rounded-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">View</button>
                 <button type="button" onClick={() => onEditLead(lead)} className="rounded-lg px-3 py-2 text-sm font-medium text-[#6366F1] hover:bg-indigo-50">Edit</button>
-                <button type="button" onClick={() => { if (confirm('Are you sure you want to delete this lead?')) onDeleteLead(lead.id); }} className="rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50">Delete</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onRequestConfirm({
+                      title: 'Delete this lead?',
+                      description: `Delete ${lead.name}? This action cannot be undone.`,
+                      confirmLabel: 'Delete lead',
+                    }).then(confirmed => {
+                      if (confirmed) onDeleteLead(lead.id);
+                    });
+                  }}
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                >
+                  Delete
+                </button>
               </div>
             </article>
           );
@@ -2813,19 +2878,6 @@ function LeadsPage({
       </>
       )}
     </motion.div>
-  );
-}
-
-function EmptyState({ icon: Icon, title, description, actionLabel, onAction }) {
-  return (
-    <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-14 text-center shadow-sm">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-[#6366F1]">
-        <Icon className="h-7 w-7" aria-hidden="true" />
-      </div>
-      <h2 className="mt-4 text-lg font-semibold text-gray-900">{title}</h2>
-      <p className="mx-auto mt-2 max-w-md text-sm text-gray-500">{description}</p>
-      {actionLabel && <button type="button" onClick={onAction} className="mt-5 rounded-xl bg-[#6366F1] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#5558d9]">{actionLabel}</button>}
-    </div>
   );
 }
 
@@ -3212,7 +3264,7 @@ function TableView({ leads, onEditLead }) {
 }
 
 // Meetings Page Component (UPDATED with Edit/Delete buttons)
-function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMeeting }) {
+function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMeeting, onRequestConfirm }) {
   const upcomingMeetings = meetings.filter(m => new Date(m.dateTime) >= new Date());
   const pastMeetings = meetings.filter(m => new Date(m.dateTime) < new Date());
 
@@ -3293,9 +3345,13 @@ function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMe
                     </button>
                     <button
                       onClick={() => {
-                        if (confirm('Are you sure you want to delete this meeting?')) {
-                          onDeleteMeeting(meeting.id);
-                        }
+                        void onRequestConfirm({
+                          title: 'Delete this meeting?',
+                          description: `Delete ${meeting.title}? This action cannot be undone.`,
+                          confirmLabel: 'Delete meeting',
+                        }).then(confirmed => {
+                          if (confirmed) onDeleteMeeting(meeting.id);
+                        });
                       }}
                       className="p-2 hover:bg-red-50 rounded-lg transition-colors"
                       title="Delete Meeting"
@@ -3352,9 +3408,13 @@ function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMe
                     </button>
                     <button
                       onClick={() => {
-                        if (confirm('Are you sure you want to delete this meeting?')) {
-                          onDeleteMeeting(meeting.id);
-                        }
+                        void onRequestConfirm({
+                          title: 'Delete this meeting?',
+                          description: `Delete ${meeting.title}? This action cannot be undone.`,
+                          confirmLabel: 'Delete meeting',
+                        }).then(confirmed => {
+                          if (confirmed) onDeleteMeeting(meeting.id);
+                        });
                       }}
                       className="p-2 hover:bg-red-50 rounded-lg transition-colors"
                       title="Delete Meeting"
@@ -4261,7 +4321,7 @@ async function sendInvoiceEmail(invoice, customer, getToken) {
   }
 }
 // Invoices Page Component
-function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onDeleteInvoice, onSendInvoice, onNotify }) {
+function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onDeleteInvoice, onRequestConfirm, onSendInvoice, onNotify }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -4562,9 +4622,14 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (canDelete && confirm('Delete this invoice?')) {
-                                onDeleteInvoice(invoice.id);
-                              }
+                              if (!canDelete) return;
+                              void onRequestConfirm({
+                                title: 'Delete this invoice?',
+                                description: `Delete ${invoice.invoice_number}? This action cannot be undone.`,
+                                confirmLabel: 'Delete invoice',
+                              }).then(confirmed => {
+                                if (confirmed) onDeleteInvoice(invoice.id);
+                              });
                             }}
                             disabled={!canDelete}
                             className="p-2 rounded-lg text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent"
