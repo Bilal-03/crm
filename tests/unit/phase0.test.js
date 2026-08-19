@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildInvoice, isInvoiceDeletable } from '../../api/invoices.js';
+import { buildInvoice, isInvoiceDeletable } from '../../routes/invoices.js';
 import { calculateInvoiceTotals, validateBulkLeadOperation, validateInvoice } from '../../server/validation.js';
 import { isProductionDeployment } from '../../server/http.js';
 import { calculateReportMetrics, getReportWindow } from '../../server/reporting.js';

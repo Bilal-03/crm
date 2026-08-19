@@ -3,12 +3,12 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const apiFiles = {
-  accounts: fs.readFileSync(new URL('../../api/accounts.js', import.meta.url), 'utf8'),
-  contacts: fs.readFileSync(new URL('../../api/contacts.js', import.meta.url), 'utf8'),
-  pipelines: fs.readFileSync(new URL('../../api/pipelines.js', import.meta.url), 'utf8'),
-  deals: fs.readFileSync(new URL('../../api/deals.js', import.meta.url), 'utf8'),
-  pipelinesSource: fs.readFileSync(new URL('../../api/pipelines.js', import.meta.url), 'utf8'),
-  summary: fs.readFileSync(new URL('../../api/deals/summary.js', import.meta.url), 'utf8'),
+  accounts: fs.readFileSync(new URL('../../routes/accounts.js', import.meta.url), 'utf8'),
+  contacts: fs.readFileSync(new URL('../../routes/contacts.js', import.meta.url), 'utf8'),
+  pipelines: fs.readFileSync(new URL('../../routes/pipelines.js', import.meta.url), 'utf8'),
+  deals: fs.readFileSync(new URL('../../routes/deals.js', import.meta.url), 'utf8'),
+  pipelinesSource: fs.readFileSync(new URL('../../routes/pipelines.js', import.meta.url), 'utf8'),
+  summary: fs.readFileSync(new URL('../../routes/deals/summary.js', import.meta.url), 'utf8'),
   conversion: fs.readFileSync(new URL('../../server/core-model.js', import.meta.url), 'utf8'),
 };
 

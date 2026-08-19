@@ -58,7 +58,8 @@ The API derives the authenticated user from the verified Clerk token. The browse
 
 ```text
 .
-├── api/                    # Vercel API entrypoints
+├── api/                    # Single catch-all Vercel API function
+├── routes/                 # Workspace-scoped API endpoint handlers
 ├── server/                 # Shared API, auth, database, and validation logic
 ├── src/                    # React entrypoint, styles, and error boundary
 ├── crm-system.jsx          # Main CRM interface and feature components
