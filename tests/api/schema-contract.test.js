@@ -38,6 +38,8 @@ test('Phase 2 migration is backward-compatible, idempotent and verifies the back
   assert.match(phase2Migration, /CREATE TABLE IF NOT EXISTS pipeline_stages/);
   assert.match(phase2Migration, /CREATE TABLE IF NOT EXISTS deals/);
   assert.match(phase2Migration, /CREATE TABLE IF NOT EXISTS deal_stage_history/);
+  assert.match(phase2Migration, /ROW_NUMBER\(\) OVER/);
+  assert.match(phase2Migration, /contact_normalized_email IS NULL OR l\.email_rank = 1/);
   assert.match(phase2Migration, /ON CONFLICT \(workspace_id, source_lead_id\)/);
   assert.match(phase2Migration, /RAISE EXCEPTION 'Phase 2 backfill incomplete/);
   assert.match(phase2Migration, /006_phase2_core_model/);

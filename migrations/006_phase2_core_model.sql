@@ -315,6 +315,15 @@ INSERT INTO contacts (
   workspace_id, account_id, owner_user_id, created_by, updated_by,
   name, email, normalized_email, phone, normalized_phone, source_lead_id
 )
+WITH lead_contacts AS (
+  SELECT l.*,
+         COALESCE(l.normalized_email, lower(trim(l.email))) AS contact_normalized_email,
+         ROW_NUMBER() OVER (
+           PARTITION BY l.workspace_id, COALESCE(l.normalized_email, lower(trim(l.email)))
+           ORDER BY l.updated_at DESC NULLS LAST, l.id DESC
+         ) AS email_rank
+  FROM leads l
+)
 SELECT l.workspace_id,
        a.id,
        l.user_id,
@@ -322,14 +331,15 @@ SELECT l.workspace_id,
        l.user_id,
        l.name,
        l.email,
-       COALESCE(l.normalized_email, lower(trim(l.email))),
+       l.contact_normalized_email,
        l.phone,
        l.normalized_phone,
        l.id
-FROM leads l
+FROM lead_contacts l
 LEFT JOIN accounts a
   ON a.workspace_id = l.workspace_id
  AND a.normalized_name = lower(COALESCE(NULLIF(trim(l.company), ''), NULLIF(trim(l.name), '')))
+WHERE l.contact_normalized_email IS NULL OR l.email_rank = 1
 ON CONFLICT (workspace_id, normalized_email) WHERE normalized_email IS NOT NULL DO UPDATE SET
   account_id = COALESCE(contacts.account_id, EXCLUDED.account_id),
   source_lead_id = COALESCE(contacts.source_lead_id, EXCLUDED.source_lead_id),
