@@ -1,3 +1,6 @@
+import { HttpError } from './http.js';
+import { ensureDefaultPipeline } from './pipelines.js';
+
 /**
  * Resolves the caller's personal workspace. Every existing account receives one
  * during migration; this upsert also makes first sign-in provisioning safe.
@@ -7,7 +10,7 @@ export async function getPersonalWorkspace(sql, userId) {
     INSERT INTO workspaces (owner_user_id, name)
     VALUES (${userId}, 'Personal CRM')
     ON CONFLICT (owner_user_id) DO UPDATE SET owner_user_id = EXCLUDED.owner_user_id
-    RETURNING id, owner_user_id, name
+    RETURNING id, owner_user_id, name, base_currency, timezone
   `;
   const workspace = rows[0];
 
@@ -17,7 +20,9 @@ export async function getPersonalWorkspace(sql, userId) {
     ON CONFLICT (workspace_id, user_id) DO NOTHING
   `;
 
-  return { ...workspace, role: 'owner' };
+  const result = { ...workspace, role: 'owner' };
+  await ensureDefaultPipeline(sql, result, userId);
+  return result;
 }
 
 export async function getActiveWorkspace(sql, userId, requestedWorkspaceId) {
@@ -30,12 +35,22 @@ export async function getActiveWorkspace(sql, userId, requestedWorkspaceId) {
   }
 
   const rows = await sql`
-    SELECT w.id, w.owner_user_id, w.name, m.role
+    SELECT w.id, w.owner_user_id, w.name, w.base_currency, w.timezone, m.role
     FROM workspace_members m
     JOIN workspaces w ON w.id = m.workspace_id
     WHERE m.workspace_id = ${requestedId} AND m.user_id = ${userId}
   `;
   if (!rows[0]) throw new HttpError(403, 'workspace_access_denied', 'You do not have access to this workspace.');
+  await ensureDefaultPipeline(sql, rows[0], userId);
   return rows[0];
 }
-import { HttpError } from './http.js';
+
+export async function assertWorkspaceMember(sql, workspaceId, userId) {
+  const rows = await sql`
+    SELECT workspace_id, user_id, role
+    FROM workspace_members
+    WHERE workspace_id = ${workspaceId} AND user_id = ${userId}
+  `;
+  if (!rows[0]) throw new HttpError(403, 'workspace_access_denied', 'You do not have access to this workspace.');
+  return rows[0];
+}

@@ -2,6 +2,8 @@ import { HttpError } from './http.js';
 
 export const LEAD_STAGES = ['new', 'qualified', 'follow-up', 'proposal', 'closed-won', 'closed-lost'];
 export const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'partial', 'cancelled'];
+export const DEAL_STATUSES = ['open', 'won', 'lost'];
+export const FORECAST_CATEGORIES = ['omitted', 'pipeline', 'best_case', 'commit', 'closed'];
 
 export function validateLead(body, { partial = false } = {}) {
   const input = object(body);
@@ -51,6 +53,108 @@ export function validateCustomer(body) {
     email: email(input, 'email', { required: true }),
     phone: nullableString(input, 'phone', 40) ?? null,
   };
+}
+
+export function validateAccount(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+
+  assign(result, 'name', string(input, 'name', { required: !partial, min: 1, max: 200, trim: true }));
+  assign(result, 'domain', nullableString(input, 'domain', 255));
+  assign(result, 'phone', nullableString(input, 'phone', 40));
+  assign(result, 'website', nullableString(input, 'website', 500));
+  assign(result, 'industry', nullableString(input, 'industry', 120));
+  assign(result, 'owner_user_id', nullableString(input, 'owner_user_id', 256));
+
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validateContact(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+
+  assign(result, 'account_id', uuid(input, 'account_id', { nullable: true }));
+  assign(result, 'name', string(input, 'name', { required: !partial, min: 1, max: 200, trim: true }));
+  assign(result, 'title', nullableString(input, 'title', 160));
+  assign(result, 'email', nullableEmail(input, 'email'));
+  assign(result, 'phone', nullableString(input, 'phone', 40));
+  assign(result, 'owner_user_id', nullableString(input, 'owner_user_id', 256));
+
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validatePipeline(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+
+  assign(result, 'name', string(input, 'name', { required: !partial, min: 1, max: 160, trim: true }));
+  assign(result, 'is_default', boolean(input, 'is_default'));
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validatePipelineStage(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+
+  assign(result, 'id', uuid(input, 'id', { nullable: true }));
+  assign(result, 'key', string(input, 'key', { required: !partial, min: 1, max: 64, trim: true }));
+  assign(result, 'name', string(input, 'name', { required: !partial, min: 1, max: 160, trim: true }));
+  assign(result, 'position', integer(input, 'position', { min: 0, max: 1_000_000 }));
+  assign(result, 'probability', number(input, 'probability', { min: 0, max: 100 }));
+  assign(result, 'color', color(input, 'color'));
+  assign(result, 'is_closed_won', boolean(input, 'is_closed_won'));
+  assign(result, 'is_closed_lost', boolean(input, 'is_closed_lost'));
+  requireFieldsForUpdate(result, partial);
+  if (result.is_closed_won && result.is_closed_lost) invalid('stage', 'cannot be both closed-won and closed-lost');
+  return result;
+}
+
+export function validateDeal(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+
+  assign(result, 'name', string(input, 'name', { required: !partial, min: 1, max: 200, trim: true }));
+  assign(result, 'account_id', uuid(input, 'account_id', { nullable: true }));
+  assign(result, 'primary_contact_id', uuid(input, 'primary_contact_id', { nullable: true }));
+  assign(result, 'owner_user_id', nullableString(input, 'owner_user_id', 256));
+  assign(result, 'pipeline_id', uuid(input, 'pipeline_id', { nullable: true }));
+  assign(result, 'stage_id', uuid(input, 'stage_id', { nullable: true }));
+  assign(result, 'amount', number(input, 'amount', { min: 0, max: 100_000_000_000 }));
+  assign(result, 'currency', currency(input, 'currency'));
+  assign(result, 'probability', number(input, 'probability', { min: 0, max: 100 }));
+  assign(result, 'expected_close_date', nullableDate(input, 'expected_close_date'));
+  assign(result, 'actual_close_date', nullableDate(input, 'actual_close_date'));
+  assign(result, 'forecast_category', enumeration(input, 'forecast_category', FORECAST_CATEGORIES));
+  assign(result, 'lead_source', nullableString(input, 'lead_source', 80));
+  assign(result, 'status', enumeration(input, 'status', DEAL_STATUSES));
+  assign(result, 'lost_reason', nullableString(input, 'lost_reason', 500));
+  assign(result, 'next_activity_date', nullableDate(input, 'next_activity_date'));
+
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validateLeadConversion(body) {
+  const input = object(body);
+  const result = {
+    lead_id: uuid(input, 'lead_id', { required: true }),
+  };
+  assign(result, 'name', string(input, 'name', { min: 1, max: 200, trim: true }));
+  assign(result, 'account_id', uuid(input, 'account_id', { nullable: true }));
+  assign(result, 'primary_contact_id', uuid(input, 'primary_contact_id', { nullable: true }));
+  assign(result, 'pipeline_id', uuid(input, 'pipeline_id', { nullable: true }));
+  assign(result, 'stage_id', uuid(input, 'stage_id', { nullable: true }));
+  assign(result, 'amount', number(input, 'amount', { min: 0, max: 100_000_000_000 }));
+  assign(result, 'currency', currency(input, 'currency'));
+  assign(result, 'probability', number(input, 'probability', { min: 0, max: 100 }));
+  assign(result, 'expected_close_date', nullableDate(input, 'expected_close_date'));
+  assign(result, 'forecast_category', enumeration(input, 'forecast_category', FORECAST_CATEGORIES));
+  assign(result, 'lost_reason', nullableString(input, 'lost_reason', 500));
+  assign(result, 'next_activity_date', nullableDate(input, 'next_activity_date'));
+  return result;
 }
 
 export function validateInvoice(body, { partial = false, allowAmountPaid = true } = {}) {
@@ -149,6 +253,12 @@ function email(input, field, { required = false } = {}) {
   return normalized;
 }
 
+function nullableEmail(input, field) {
+  if (!(field in input) || input[field] === undefined) return undefined;
+  if (input[field] === null || input[field] === '') return null;
+  return email(input, field, { required: true });
+}
+
 function uuid(input, field, { required = false, nullable = false } = {}) {
   if (!(field in input) || input[field] === undefined) {
     if (required) invalid(field, 'is required');
@@ -177,6 +287,12 @@ function date(input, field, { required = false } = {}) {
   return value;
 }
 
+function nullableDate(input, field) {
+  if (!(field in input) || input[field] === undefined) return undefined;
+  if (input[field] === null || input[field] === '') return null;
+  return date(input, field, { required: true });
+}
+
 function dateTime(input, field, { required = false } = {}) {
   const value = string(input, field, { required, max: 64 });
   if (value === undefined) return undefined;
@@ -191,6 +307,36 @@ function number(input, field, { min, max, defaultValue } = {}) {
   if (min !== undefined && value < min) invalid(field, `must be at least ${min}`);
   if (max !== undefined && value > max) invalid(field, `must be at most ${max}`);
   return value;
+}
+
+function integer(input, field, { min, max, defaultValue } = {}) {
+  if (!(field in input) || input[field] === undefined) return defaultValue;
+  const value = Number(input[field]);
+  if (!Number.isInteger(value)) invalid(field, 'must be an integer');
+  if (min !== undefined && value < min) invalid(field, `must be at least ${min}`);
+  if (max !== undefined && value > max) invalid(field, `must be at most ${max}`);
+  return value;
+}
+
+function boolean(input, field, defaultValue) {
+  if (!(field in input) || input[field] === undefined) return defaultValue;
+  if (typeof input[field] !== 'boolean') invalid(field, 'must be a boolean');
+  return input[field];
+}
+
+function currency(input, field) {
+  if (!(field in input) || input[field] === undefined) return undefined;
+  if (typeof input[field] !== 'string' || !/^[A-Za-z]{3}$/.test(input[field].trim())) {
+    invalid(field, 'must be a three-letter currency code');
+  }
+  return input[field].trim().toUpperCase();
+}
+
+function color(input, field) {
+  if (!(field in input) || input[field] === undefined) return undefined;
+  const value = string(input, field, { min: 4, max: 16, trim: true });
+  if (!/^#[0-9a-f]{3,8}$/i.test(value)) invalid(field, 'must be a hexadecimal color');
+  return value.toUpperCase();
 }
 
 function notes(value) {

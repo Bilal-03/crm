@@ -9,7 +9,7 @@ export default withApiRoute({
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
     const trendDays = getQueryInteger(req.query, 'trendDays', 7, 1, 365);
 
-    const [leadSummaryRows, invoiceSummaryRows, meetingSummaryRows, reminderRows, stageRows, leadTrendRows, revenueTrendRows] = await Promise.all([
+    const [leadSummaryRows, invoiceSummaryRows, meetingSummaryRows, reminderRows, stageRows, leadTrendRows, revenueTrendRows, dealSummaryRows] = await Promise.all([
       sql`
         SELECT
           COUNT(*)::int AS total,
@@ -73,11 +73,23 @@ export default withApiRoute({
         GROUP BY COALESCE(paid_at::date, invoice_date)
         ORDER BY day
       `,
+      sql`
+        SELECT d.currency,
+               COALESCE(SUM(d.amount) FILTER (WHERE d.status = 'open'), 0) AS open_pipeline_amount,
+               COALESCE(SUM(d.amount * d.probability / 100) FILTER (WHERE d.status = 'open'), 0) AS weighted_pipeline_amount,
+               COALESCE(SUM(d.amount) FILTER (WHERE d.status = 'won'), 0) AS closed_won_amount,
+               COALESCE(SUM(d.amount) FILTER (WHERE d.status = 'lost'), 0) AS closed_lost_amount
+        FROM deals d
+        WHERE d.workspace_id = ${workspace.id}
+        GROUP BY d.currency
+        ORDER BY d.currency
+      `,
     ]);
 
     const leads = leadSummaryRows[0] || {};
     const invoices = invoiceSummaryRows[0] || {};
     const meetings = meetingSummaryRows[0] || {};
+    const baseCurrencyDeals = dealSummaryRows.find(row => row.currency === workspace.base_currency) || {};
     const trendByDay = new Map();
     leadTrendRows.forEach(row => trendByDay.set(String(row.day), { leads: Number(row.leads || 0), revenue: 0 }));
     revenueTrendRows.forEach(row => {
@@ -106,6 +118,20 @@ export default withApiRoute({
           totalRevenue: Number(invoices.total_revenue || 0),
           outstanding: Number(invoices.outstanding || 0),
           thisMonthRevenue: Number(invoices.this_month_revenue || 0),
+        },
+        deals: {
+          currency: workspace.base_currency,
+          openPipelineAmount: Number(baseCurrencyDeals.open_pipeline_amount || 0),
+          weightedPipelineAmount: Number(baseCurrencyDeals.weighted_pipeline_amount || 0),
+          closedWonAmount: Number(baseCurrencyDeals.closed_won_amount || 0),
+          closedLostAmount: Number(baseCurrencyDeals.closed_lost_amount || 0),
+          byCurrency: dealSummaryRows.map(row => ({
+            currency: row.currency,
+            openPipelineAmount: Number(row.open_pipeline_amount || 0),
+            weightedPipelineAmount: Number(row.weighted_pipeline_amount || 0),
+            closedWonAmount: Number(row.closed_won_amount || 0),
+            closedLostAmount: Number(row.closed_lost_amount || 0),
+          })),
         },
         stages: stageRows.map(row => ({ stage: row.stage, count: Number(row.count || 0) })),
         revenueTrend: buildTrend(trendDays, trendByDay),

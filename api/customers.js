@@ -10,6 +10,7 @@ import {
 } from '../server/http.js';
 import { validateCustomer } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { normalizeEmail, normalizePhone } from '../server/normalization.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST'],
@@ -27,7 +28,7 @@ export default withApiRoute({
         company: 'company',
       }, 'created');
       const rows = await sql`
-        SELECT id, name, company, email, phone, created_at, updated_at, COUNT(*) OVER() AS __total_count
+        SELECT id, name, company, email, phone, normalized_email, normalized_phone, created_at, updated_at, COUNT(*) OVER() AS __total_count
         FROM customers
         WHERE workspace_id = ${workspace.id}
           AND (${search}::text IS NULL OR name ILIKE ${search ? `%${search}%` : null} OR company ILIKE ${search ? `%${search}%` : null} OR email ILIKE ${search ? `%${search}%` : null} OR phone ILIKE ${search ? `%${search}%` : null})
@@ -40,14 +41,16 @@ export default withApiRoute({
 
     const customer = validateCustomer(req.body);
     const rows = await sql`
-      INSERT INTO customers (workspace_id, user_id, name, company, email, phone)
-      VALUES (${workspace.id}, ${userId}, ${customer.name}, ${customer.company}, ${customer.email}, ${customer.phone})
+      INSERT INTO customers (workspace_id, user_id, name, company, email, phone, normalized_email, normalized_phone)
+      VALUES (${workspace.id}, ${userId}, ${customer.name}, ${customer.company}, ${customer.email}, ${customer.phone}, ${normalizeEmail(customer.email)}, ${normalizePhone(customer.phone)})
       ON CONFLICT (workspace_id, lower(email)) DO UPDATE SET
         name = EXCLUDED.name,
         company = EXCLUDED.company,
         phone = EXCLUDED.phone,
+        normalized_email = EXCLUDED.normalized_email,
+        normalized_phone = EXCLUDED.normalized_phone,
         updated_at = NOW()
-      RETURNING id, name, company, email, phone, created_at, updated_at
+      RETURNING id, name, company, email, phone, normalized_email, normalized_phone, created_at, updated_at
     `;
     return json(res, 201, { data: rows[0] });
   },

@@ -5,6 +5,10 @@ import { buildInvoice, isInvoiceDeletable } from '../../api/invoices.js';
 import { calculateInvoiceTotals, validateBulkLeadOperation, validateInvoice } from '../../server/validation.js';
 import { isProductionDeployment } from '../../server/http.js';
 import { calculateReportMetrics, getReportWindow } from '../../server/reporting.js';
+import { DEFAULT_PIPELINE_STAGES } from '../../server/pipelines.js';
+import { legacyLeadAmount } from '../../server/core-model.js';
+import { normalizeDomain, normalizeEmail, normalizeName, normalizePhone } from '../../server/normalization.js';
+import { validateDeal, validatePipelineStage } from '../../server/validation.js';
 import { createPhase0Fixtures } from '../fixtures/phase0-fixtures.js';
 
 test('invoice totals use cents and cap paid amount at the total', () => {
@@ -95,4 +99,25 @@ test('development deployment mode explicitly permits test-key deployments', () =
     NODE_ENV: 'production',
   }), true);
   assert.equal(isProductionDeployment({ VERCEL_ENV: 'production' }), true);
+});
+
+test('Phase 2 normalization and legacy quote conversion are deterministic', () => {
+  assert.equal(normalizeEmail('  Sales@Example.COM '), 'sales@example.com');
+  assert.equal(normalizePhone('+91 (987) 654-3210'), '+919876543210');
+  assert.equal(normalizeDomain('https://www.Example.com/path'), 'example.com');
+  assert.equal(normalizeName('  Acme   Corporation '), 'acme corporation');
+  assert.equal(legacyLeadAmount([
+    { quantity: 2, price: 19.995 },
+    { quantity: 1, price: 10 },
+  ]), 49.99);
+});
+
+test('Phase 2 defaults preserve configurable stage metadata and validate deals', () => {
+  assert.equal(DEFAULT_PIPELINE_STAGES.length, 6);
+  assert.equal(DEFAULT_PIPELINE_STAGES.find(stage => stage.key === 'closed-won').probability, 100);
+  assert.throws(
+    () => validatePipelineStage({ key: 'invalid', name: 'Invalid', position: 1, is_closed_won: true, is_closed_lost: true }),
+    error => error.code === 'validation_error',
+  );
+  assert.deepEqual(validateDeal({ name: 'Expansion', amount: 1250, currency: 'inr' }).currency, 'INR');
 });

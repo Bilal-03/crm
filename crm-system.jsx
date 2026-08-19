@@ -1673,10 +1673,10 @@ function Dashboard({ stats, summary, trendRange = '7', onTrendRangeChange, activ
     )
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  // Calculate pipeline value
-  const pipelineValue = leads
-    .filter(l => ['qualified', 'proposal'].includes(l.stage))
-    .length * 5000;
+  // Phase 2 exposes real deal totals through the dashboard aggregate. Keep the
+  // legacy page read-only until the Phase 3 deal UI replaces this view.
+  const pipelineValue = Number(summary?.deals?.openPipelineAmount || 0);
+  const weightedPipelineValue = Number(summary?.deals?.weightedPipelineAmount || 0);
 
   const todayMeetings = upcomingMeetings.filter(meeting => new Date(meeting.dateTime).toDateString() === new Date().toDateString());
   const priorityCount = overdueInvoices.length + overdueReminders.length + todayMeetings.length;

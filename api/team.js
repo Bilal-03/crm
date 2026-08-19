@@ -21,7 +21,7 @@ export default withApiRoute({
       const [members, invitations, workspaces] = await Promise.all([
         sql`SELECT user_id, email, role, created_at FROM workspace_members WHERE workspace_id = ${workspace.id} ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, created_at`,
         sql`SELECT id, email, role, created_at, expires_at FROM workspace_invitations WHERE workspace_id = ${workspace.id} AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > NOW() ORDER BY created_at DESC`,
-        sql`SELECT w.id, w.name, m.role FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ${userId} ORDER BY w.created_at`,
+        sql`SELECT w.id, w.name, w.base_currency, w.timezone, m.role FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id WHERE m.user_id = ${userId} ORDER BY w.created_at`,
       ]);
       return json(res, 200, { data: { workspace, members, invitations, workspaces } });
     }
@@ -32,6 +32,7 @@ export default withApiRoute({
 
     if (body.action === 'invite') return json(res, 201, { data: await createInvitation(sql, workspace.id, userId, body) });
     if (body.action === 'rename') return json(res, 200, { data: await renameWorkspace(sql, workspace, body.name) });
+    if (body.action === 'settings') return json(res, 200, { data: await updateWorkspaceSettings(sql, workspace, body) });
     if (body.action === 'role') return json(res, 200, { data: await updateRole(sql, workspace, body) });
     if (body.action === 'remove') return json(res, 200, { data: await removeMember(sql, workspace, body) });
     if (body.action === 'revoke') return json(res, 200, { data: await revokeInvitation(sql, workspace.id, body.invitationId) });
@@ -48,6 +49,25 @@ async function renameWorkspace(sql, workspace, value) {
   const name = typeof value === 'string' ? value.trim() : '';
   if (name.length < 2 || name.length > 160) throw new HttpError(400, 'validation_error', 'Workspace name must be between 2 and 160 characters.');
   const rows = await sql`UPDATE workspaces SET name = ${name}, updated_at = NOW() WHERE id = ${workspace.id} RETURNING id, name`;
+  return rows[0];
+}
+
+async function updateWorkspaceSettings(sql, workspace, body) {
+  const currency = typeof body.baseCurrency === 'string' ? body.baseCurrency.trim().toUpperCase() : workspace.base_currency;
+  const timezone = typeof body.timezone === 'string' ? body.timezone.trim() : workspace.timezone;
+  if (!/^[A-Z]{3}$/.test(currency)) throw new HttpError(400, 'validation_error', 'baseCurrency must be a three-letter currency code.');
+  if (!timezone || timezone.length > 64) throw new HttpError(400, 'validation_error', 'timezone must be between 1 and 64 characters.');
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format();
+  } catch {
+    throw new HttpError(400, 'validation_error', 'timezone must be a valid IANA timezone.');
+  }
+  const rows = await sql`
+    UPDATE workspaces
+    SET base_currency = ${currency}, timezone = ${timezone}, updated_at = NOW()
+    WHERE id = ${workspace.id}
+    RETURNING id, name, base_currency, timezone, updated_at
+  `;
   return rows[0];
 }
 

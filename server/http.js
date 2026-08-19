@@ -137,6 +137,13 @@ export function getRequiredId(query = {}) {
   return id;
 }
 
+export function getQueryUuid(query = {}, field) {
+  const value = getQueryString(query, field, 64);
+  if (value === null) return null;
+  if (!isUuid(value)) throw new HttpError(400, 'invalid_query', `${field} must be a valid UUID.`);
+  return value;
+}
+
 export function withApiRoute({ methods, handler, maxBodyBytes = DEFAULT_BODY_LIMIT }) {
   const allowedMethods = new Set(methods);
 

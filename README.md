@@ -112,9 +112,10 @@ psql "$NEON_DATABASE_URL" -f migrations/002_production_hardening.sql
 psql "$NEON_DATABASE_URL" -f migrations/003_workspace_foundation.sql
 psql "$NEON_DATABASE_URL" -f migrations/004_team_settings.sql
 psql "$NEON_DATABASE_URL" -f migrations/005_phase0_data_correctness.sql
+psql "$NEON_DATABASE_URL" -f migrations/006_phase2_core_model.sql
 ```
 
-`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation and Phase 0 reporting structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
+`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation, Phase 0 reporting and Phase 2 CRM core structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
 
 After migration, validate the Phase 0 backfill with:
 
@@ -125,7 +126,18 @@ SELECT COUNT(*) FILTER (WHERE stage = 'closed-won' AND won_at IS NULL) AS missin
 FROM leads;
 ```
 
-Phase 0 adds nullable timestamps and does not drop or rewrite legacy records. If validation fails, stop deployment and restore the pre-migration snapshot; do not manually delete the new columns or tables from a live database.
+For the Phase 2 backfill, verify that every legacy lead has a deal, stage-history row, contact and account before deploying the new CRM APIs:
+
+```sql
+SELECT COUNT(*) AS legacy_leads,
+       COUNT(DISTINCT d.id) AS migrated_deals,
+       COUNT(DISTINCT h.id) AS migrated_stage_history
+FROM leads l
+LEFT JOIN deals d ON d.workspace_id = l.workspace_id AND d.source_lead_id = l.id
+LEFT JOIN deal_stage_history h ON h.workspace_id = l.workspace_id AND h.source_lead_id = l.id;
+```
+
+Phase 2 adds normalized fields and new core CRM tables without dropping legacy records. If validation fails, stop deployment and restore the pre-migration snapshot; do not manually delete the new columns or tables from a live database.
 
 ### 4. Start the application
 
@@ -162,7 +174,7 @@ npm run preview   # Preview the production bundle locally
 npm run lint      # Parse-check server, API, test, and utility JavaScript files
 npm run test      # Run unit and API contract tests
 npm run check     # Run lint, tests, and the production build verification
-npm run smoke:fresh-db # Verify the required Phase 0 schema on an isolated database
+npm run smoke:fresh-db # Verify the required Phase 2 schema on an isolated database
 ```
 
 ## API resources
@@ -171,6 +183,12 @@ npm run smoke:fresh-db # Verify the required Phase 0 schema on an isolated datab
 | --- | --- | --- |
 | `/api/leads` | GET, POST, PUT, DELETE | Lead records, stages, notes, reminders, and quote items |
 | `/api/customers` | GET, POST | Customer records and lead-to-customer promotion |
+| `/api/accounts` | GET, POST, PUT, DELETE | Workspace-scoped account records and matching fields |
+| `/api/contacts` | GET, POST, PUT, DELETE | Workspace-scoped contacts and account relationships |
+| `/api/pipelines` | GET, POST, PUT, DELETE | Configurable pipelines and stage metadata |
+| `/api/deals` | GET, POST, PUT, DELETE | Deal records, real amounts, weighted values, and stage history |
+| `/api/deals/summary` | GET | Pipeline, weighted, forecast, and closed totals by currency |
+| `/api/leads/convert` | POST | Idempotent lead-to-account/contact/deal conversion |
 | `/api/meetings` | GET, POST, PUT, DELETE | Meeting scheduling and relationship ownership checks |
 | `/api/activities` | GET, POST | Activity timeline records |
 | `/api/invoices` | GET, POST, PUT, DELETE | Invoice lifecycle, totals, balances, and payment status |
