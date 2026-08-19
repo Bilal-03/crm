@@ -67,6 +67,7 @@ import { pageFromPathname, pathForPage } from './src/app/routes.js';
 import { AppShell } from './src/components/layout/AppShell.jsx';
 import { ConfirmDialog } from './src/components/ui/ConfirmDialog.jsx';
 import { EmptyState } from './src/components/ui/EmptyState.jsx';
+import SalesWorkspace from './src/features/sales/SalesWorkspace.jsx';
 
 let pdfLibrariesPromise;
 const loadPdfLibraries = () => {
@@ -409,6 +410,10 @@ export default function CRMApp() {
   const [activities, setActivities] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [customerRecords, setCustomerRecords] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [deals, setDeals] = useState([]);
+  const [pipelines, setPipelines] = useState([]);
   const [dashboardTrendRange, setDashboardTrendRange] = useState('7');
   const [reportRangeDays, setReportRangeDays] = useState(30);
   
@@ -491,13 +496,17 @@ export default function CRMApp() {
   const fetchData = async (userId) => {
     setLoading(true);
     try {
-      const resources = ['leads', 'meetings', 'activities', 'invoices', 'customers'];
+      const resources = ['leads', 'meetings', 'activities', 'invoices', 'customers', 'accounts', 'contacts', 'deals', 'pipelines'];
       const results = await Promise.allSettled([
         fetchAllPages(api, '/leads'),
         fetchAllPages(api, '/meetings'),
         fetchAllPages(api, '/activities'),
         fetchAllPages(api, '/invoices'),
         fetchAllPages(api, '/customers'),
+        fetchAllPages(api, '/accounts'),
+        fetchAllPages(api, '/contacts'),
+        fetchAllPages(api, '/deals'),
+        fetchAllPages(api, '/pipelines'),
       ]);
       const failures = results
         .map((result, index) => result.status === 'rejected'
@@ -507,12 +516,16 @@ export default function CRMApp() {
       setDataLoadErrors(failures);
       failures.forEach(failure => console.error(`Error fetching ${failure.resource}:`, failure.message));
 
-      const [leadsResult, meetingsResult, activitiesResult, invoicesResult, customersResult] = results;
+      const [leadsResult, meetingsResult, activitiesResult, invoicesResult, customersResult, accountsResult, contactsResult, dealsResult, pipelinesResult] = results;
       const leadsRes = leadsResult.status === 'fulfilled' ? leadsResult.value : null;
       const meetingsRes = meetingsResult.status === 'fulfilled' ? meetingsResult.value : null;
       const activitiesRes = activitiesResult.status === 'fulfilled' ? activitiesResult.value : null;
       const invoiceRows = invoicesResult.status === 'fulfilled' ? invoicesResult.value : null;
       const customerRows = customersResult.status === 'fulfilled' ? customersResult.value : null;
+      const accountRows = accountsResult.status === 'fulfilled' ? accountsResult.value : null;
+      const contactRows = contactsResult.status === 'fulfilled' ? contactsResult.value : null;
+      const dealRows = dealsResult.status === 'fulfilled' ? dealsResult.value : null;
+      const pipelineRows = pipelinesResult.status === 'fulfilled' ? pipelinesResult.value : null;
 
       if (leadsRes) {
         const mappedLeads = leadsRes.map(l => ({
@@ -536,6 +549,10 @@ export default function CRMApp() {
       if (activitiesRes) setActivities(activitiesRes);
       if (invoiceRows) setInvoices(invoiceRows);
       if (customerRows) setCustomerRecords(customerRows);
+      if (accountRows) setAccounts(accountRows);
+      if (contactRows) setContacts(contactRows);
+      if (dealRows) setDeals(dealRows);
+      if (pipelineRows) setPipelines(pipelineRows);
     } catch (error) {
       console.error('Error fetching data:', error);
       notify('We could not load your CRM data. Please try again.', 'error');
@@ -779,6 +796,94 @@ export default function CRMApp() {
       console.error('Error deleting leads in bulk:', error);
       setLeads(previousLeads);
       notify(error.message || 'Some leads could not be deleted.', 'error');
+    }
+  };
+
+  const createAccount = async input => {
+    try {
+      const data = await fetchApi('/accounts', { method: 'POST', body: input });
+      setAccounts(prev => [data, ...prev]);
+      notify('Account created.');
+      return data;
+    } catch (error) {
+      notify(error.message || 'The account could not be created.', 'error');
+      throw error;
+    }
+  };
+
+  const updateAccount = async (accountId, input) => {
+    try {
+      const data = await fetchApi(`/accounts?id=${accountId}`, { method: 'PUT', body: input });
+      setAccounts(prev => prev.map(account => account.id === accountId ? data : account));
+      notify('Account updated.');
+      return data;
+    } catch (error) {
+      notify(error.message || 'The account could not be updated.', 'error');
+      throw error;
+    }
+  };
+
+  const createContact = async input => {
+    try {
+      const data = await fetchApi('/contacts', { method: 'POST', body: input });
+      setContacts(prev => [data, ...prev]);
+      notify('Contact created.');
+      return data;
+    } catch (error) {
+      notify(error.message || 'The contact could not be created.', 'error');
+      throw error;
+    }
+  };
+
+  const updateContact = async (contactId, input) => {
+    try {
+      const data = await fetchApi(`/contacts?id=${contactId}`, { method: 'PUT', body: input });
+      setContacts(prev => prev.map(contact => contact.id === contactId ? data : contact));
+      notify('Contact updated.');
+      return data;
+    } catch (error) {
+      notify(error.message || 'The contact could not be updated.', 'error');
+      throw error;
+    }
+  };
+
+  const createDeal = async input => {
+    try {
+      const data = await fetchApi('/deals', { method: 'POST', body: input });
+      setDeals(prev => [data, ...prev]);
+      invalidateDashboard();
+      notify('Deal created.');
+      return data;
+    } catch (error) {
+      notify(error.message || 'The deal could not be created.', 'error');
+      throw error;
+    }
+  };
+
+  const updateDeal = async (dealId, input) => {
+    try {
+      const data = await fetchApi(`/deals?id=${dealId}`, { method: 'PUT', body: input });
+      setDeals(prev => prev.map(deal => deal.id === dealId ? data : deal));
+      invalidateDashboard();
+      return data;
+    } catch (error) {
+      notify(error.message || 'The deal could not be updated.', 'error');
+      throw error;
+    }
+  };
+
+  const convertLeadToDeal = async lead => {
+    try {
+      const result = await fetchApi('/leads/convert', { method: 'POST', body: { lead_id: lead.id }, includeMeta: true });
+      const data = result.data;
+      setDeals(prev => [data, ...prev.filter(deal => deal.id !== data.id)]);
+      invalidateDashboard();
+      notify(result.converted === false ? 'This lead already has a deal.' : 'Lead converted to a deal.');
+      navigate(pathForPage('deals'));
+      return data;
+    } catch (error) {
+      notify(error.message || 'The lead could not be converted.', 'error');
+      throw error;
     }
   };
 
@@ -1165,64 +1270,34 @@ export default function CRMApp() {
             </div>
           )}
           <AnimatePresence mode="wait">
-            {currentPage === 'dashboard' && (
-              <Dashboard 
-                stats={stats}
+            {['dashboard', 'leads', 'contacts', 'accounts', 'deals', 'pipeline'].includes(currentPage) && (
+              <SalesWorkspace
+                page={currentPage}
+                loading={loading}
+                error={dataLoadErrors.filter(item => ['leads', 'accounts', 'contacts', 'deals', 'pipelines'].includes(item.resource)).map(item => `${item.resource}: ${item.message}`).join(' ') || null}
                 summary={dashboardData}
-                trendRange={dashboardTrendRange}
-                onTrendRangeChange={setDashboardTrendRange}
+                leads={leads}
+                accounts={accounts}
+                contacts={contacts}
+                deals={deals}
+                pipelines={pipelines}
                 activities={activities}
                 meetings={meetings}
-                leads={leads}
-                invoices={invoices}
-                customers={customers}
                 onNavigate={navigateTo}
                 onAddLead={() => setShowLeadModal(true)}
-              />
-            )}
-            
-            {currentPage === 'leads' && (
-              <LeadsPage 
-                leads={filteredLeads}
-                searchTerm={searchTerm}
-                setSearchTerm={setSearchTerm}
-                filterStage={filterStage}
-                setFilterStage={setFilterStage}
-                onAddLead={() => setShowLeadModal(true)}
                 onEditLead={(lead) => {
                   setSelectedLead(lead);
                   setShowLeadModal(true);
                 }}
-                onViewLead={(lead) => setSelectedLead(lead)}
-                onDeleteLead={deleteLead}
-                onBulkUpdateStage={bulkUpdateLeads}
-                onBulkDelete={bulkDeleteLeads}
-                onRequestConfirm={requestConfirm}
-                onExport={() => exportToCSV(filteredLeads, 'leads.csv')}
-              />
-            )}
-            
-            {currentPage === 'clients' && (
-              <ClientsPage 
-                clients={clients}
-                onViewClient={(lead) => {
-                  setSelectedLead({ ...lead, __profileType: 'client' });
-                }}
-              />
-            )}
-            
-            {currentPage === 'pipeline' && (
-              <PipelinePage 
-                leads={filteredLeads}
-                view={pipelineView}
-                setView={setPipelineView}
-                onDragEnd={handleDragEnd}
-                onEditLead={(lead) => {
-                  setSelectedLead(lead);
-                  setShowLeadModal(true);
-                }}
-                searchTerm={searchTerm}
-                setSearchTerm={setSearchTerm}
+                onViewLead={lead => setSelectedLead(lead)}
+                onConvertLead={convertLeadToDeal}
+                onCreateDeal={createDeal}
+                onUpdateDeal={updateDeal}
+                onCreateAccount={createAccount}
+                onUpdateAccount={updateAccount}
+                onCreateContact={createContact}
+                onUpdateContact={updateContact}
+                onNotify={notify}
               />
             )}
             
@@ -1378,14 +1453,20 @@ export default function CRMApp() {
 
 // Sidebar Component
 function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces, activeWorkspaceId, onSelectWorkspace }) {
-  const menuItems = [
-    { id: 'dashboard', icon: Home, label: 'Dashboard' },
-    { id: 'leads', icon: Users, label: 'Leads' },
-    { id: 'clients', icon: Target, label: 'Clients' },
-    { id: 'pipeline', icon: Activity, label: 'Pipeline' },
-    { id: 'reports', icon: BarChart3, label: 'Reports' },
-    { id: 'invoices', icon: FileText, label: 'Invoices' },
-    { id: 'meetings', icon: Calendar, label: 'Meetings' }
+  const sections = [
+    { label: 'Workspace', items: [{ id: 'dashboard', icon: Home, label: 'Dashboard' }] },
+    { label: 'Sales', items: [
+      { id: 'leads', icon: Users, label: 'Leads' },
+      { id: 'contacts', icon: User, label: 'Contacts' },
+      { id: 'accounts', icon: Building2, label: 'Accounts' },
+      { id: 'deals', icon: Target, label: 'Deals' },
+      { id: 'pipeline', icon: Activity, label: 'Pipeline' },
+    ] },
+    { label: 'Operations', items: [
+      { id: 'reports', icon: BarChart3, label: 'Reports' },
+      { id: 'invoices', icon: FileText, label: 'Invoices' },
+      { id: 'meetings', icon: Calendar, label: 'Meetings' },
+    ] },
   ];
 
   return (
@@ -1425,25 +1506,30 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
         </div>
       )}
 
-      <nav className="flex-1 space-y-2 overflow-y-auto p-4">
-        {menuItems.map(item => (
-          <button
-            key={item.id}
-            onClick={() => onNavigate(item.id)}
-            aria-current={currentPage === item.id ? 'page' : undefined}
-            aria-label={open ? undefined : item.label}
-            title={open ? undefined : item.label}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${
-              currentPage === item.id
-                ? 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white shadow-lg shadow-[#6366F1]/30'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-            }`}
-          >
-            <item.icon className="w-5 h-5 flex-shrink-0" />
-            {open && (
-              <span>{item.label}</span>
-            )}
-          </button>
+      <nav className="flex-1 space-y-5 overflow-y-auto p-4">
+        {sections.map(section => (
+          <div key={section.label}>
+            {open && <p className="mb-2 px-4 text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">{section.label}</p>}
+            <div className="space-y-1">
+              {section.items.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => onNavigate(item.id)}
+                  aria-current={currentPage === item.id ? 'page' : undefined}
+                  aria-label={open ? undefined : item.label}
+                  title={open ? undefined : item.label}
+                  className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 font-medium transition-all ${
+                    currentPage === item.id
+                      ? 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white shadow-lg shadow-[#6366F1]/30'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  }`}
+                >
+                  <item.icon className="h-5 w-5 flex-shrink-0" />
+                  {open && <span>{item.label}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
@@ -1522,8 +1608,8 @@ function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
   const items = [
     { id: 'dashboard', label: 'Home', icon: Home },
     { id: 'leads', label: 'Leads', icon: Users },
+    { id: 'deals', label: 'Deals', icon: Target },
     { id: 'pipeline', label: 'Pipeline', icon: Activity },
-    { id: 'reports', label: 'Reports', icon: BarChart3 },
   ];
 
   return (

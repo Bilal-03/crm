@@ -39,9 +39,7 @@ export default withApiRoute({
         if (!pipelines[0]) throw new HttpError(404, 'not_found', 'Pipeline not found.');
         return json(res, 200, { data: pipelines[0] });
       }
-      return json(res, 200, {
-        data: paginated(pipelines, pagination, Number(rows[0]?.__total_count ?? 0)),
-      });
+      return json(res, 200, paginated(pipelines, pagination, Number(rows[0]?.__total_count ?? 0)));
     }
 
     if (req.method === 'POST') {

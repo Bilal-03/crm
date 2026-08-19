@@ -7,6 +7,7 @@ const apiFiles = {
   contacts: fs.readFileSync(new URL('../../api/contacts.js', import.meta.url), 'utf8'),
   pipelines: fs.readFileSync(new URL('../../api/pipelines.js', import.meta.url), 'utf8'),
   deals: fs.readFileSync(new URL('../../api/deals.js', import.meta.url), 'utf8'),
+  pipelinesSource: fs.readFileSync(new URL('../../api/pipelines.js', import.meta.url), 'utf8'),
   summary: fs.readFileSync(new URL('../../api/deals/summary.js', import.meta.url), 'utf8'),
   conversion: fs.readFileSync(new URL('../../server/core-model.js', import.meta.url), 'utf8'),
 };
@@ -26,4 +27,7 @@ test('Phase 2 APIs preserve idempotency, real amounts and stage-history metadata
   assert.match(apiFiles.deals, /changed_at/);
   assert.match(apiFiles.summary, /SUM\(d\.amount\)/);
   assert.match(apiFiles.summary, /d\.amount \* d\.probability \/ 100/);
+  assert.match(apiFiles.deals, /getDealById\(sql, workspace\.id, requestedId\)/);
+  assert.match(apiFiles.conversion, /stage_history/);
+  assert.match(apiFiles.pipelinesSource, /return json\(res, 200, paginated\(pipelines/);
 });

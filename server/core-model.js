@@ -36,7 +36,7 @@ export async function getContactInWorkspace(sql, workspaceId, contactId) {
   return rows[0];
 }
 
-export async function assertDealReferences(sql, workspaceId, accountId, contactId) {
+export async function assertDealReferences(sql, workspaceId, accountId, contactId, updatedBy) {
   const account = await getAccountInWorkspace(sql, workspaceId, accountId);
   const contact = await getContactInWorkspace(sql, workspaceId, contactId);
   if (account && contact?.account_id && account.id !== contact.account_id) {
@@ -45,8 +45,8 @@ export async function assertDealReferences(sql, workspaceId, accountId, contactI
   if (account && contact && !contact.account_id) {
     await sql`
       UPDATE contacts
-      SET account_id = ${account.id}, updated_by = ${userId}, updated_at = NOW()
-      WHERE id = ${contact.id} AND workspace_id = ${workspace.id}
+      SET account_id = ${account.id}, updated_by = ${updatedBy}, updated_at = NOW()
+      WHERE id = ${contact.id} AND workspace_id = ${workspaceId}
     `;
     contact.account_id = account.id;
   }
@@ -149,7 +149,33 @@ export async function getDealById(sql, workspaceId, dealId) {
     WHERE d.id = ${dealId} AND d.workspace_id = ${workspaceId}
   `;
   if (!rows[0]) throw new HttpError(404, 'not_found', 'Deal not found.');
-  return mapDealRow(rows[0]);
+  const historyRows = await sql`
+    SELECT h.id, h.from_stage_id, h.to_stage_id, h.changed_by, h.changed_at,
+           from_stage.name AS from_stage_name, to_stage.name AS to_stage_name
+    FROM deal_stage_history h
+    LEFT JOIN pipeline_stages from_stage
+      ON from_stage.id = h.from_stage_id
+     AND from_stage.pipeline_id = h.pipeline_id
+     AND from_stage.workspace_id = h.workspace_id
+    JOIN pipeline_stages to_stage
+      ON to_stage.id = h.to_stage_id
+     AND to_stage.pipeline_id = h.pipeline_id
+     AND to_stage.workspace_id = h.workspace_id
+    WHERE h.deal_id = ${dealId} AND h.workspace_id = ${workspaceId}
+    ORDER BY h.changed_at DESC, h.id DESC
+  `;
+  return {
+    ...mapDealRow(rows[0]),
+    stage_history: historyRows.map(history => ({
+      id: history.id,
+      from_stage_id: history.from_stage_id,
+      to_stage_id: history.to_stage_id,
+      from_stage_name: history.from_stage_name,
+      to_stage_name: history.to_stage_name,
+      changed_by: history.changed_by,
+      changed_at: history.changed_at,
+    })),
+  };
 }
 
 export function mapDealRow(row) {

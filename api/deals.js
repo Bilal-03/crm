@@ -88,7 +88,7 @@ export default withApiRoute({
       const result = stripTotalCount(rows).data.map(mapDealRow);
       if (requestedId) {
         if (!result[0]) throw new HttpError(404, 'not_found', 'Deal not found.');
-        return json(res, 200, { data: result[0] });
+        return json(res, 200, { data: await getDealById(sql, workspace.id, requestedId) });
       }
       return json(res, 200, paginated(result, pagination, Number(rows[0]?.__total_count ?? 0)));
     }
@@ -96,7 +96,7 @@ export default withApiRoute({
     if (req.method === 'POST') {
       const input = validateDeal(req.body);
       const ownerUserId = await resolveOwnerUser(sql, workspace.id, userId, input.owner_user_id);
-      const { account, contact } = await assertDealReferences(sql, workspace.id, input.account_id, input.primary_contact_id);
+      const { account, contact } = await assertDealReferences(sql, workspace.id, input.account_id, input.primary_contact_id, userId);
       const pipelineStage = await resolvePipelineStage(sql, workspace.id, input.pipeline_id, input.stage_id);
       const status = dealStatusForStage(pipelineStage.stage, input.status);
       const rows = await sql`
@@ -144,7 +144,7 @@ export default withApiRoute({
       const stageChanged = pipelineStage.stage.id !== existing.stage_id || pipelineStage.pipeline.id !== existing.pipeline_id;
       const accountId = has('account_id') ? input.account_id : existing.account_id;
       const contactId = has('primary_contact_id') ? input.primary_contact_id : existing.primary_contact_id;
-      const { account, contact } = await assertDealReferences(sql, workspace.id, accountId, contactId);
+      const { account, contact } = await assertDealReferences(sql, workspace.id, accountId, contactId, userId);
       const ownerUserId = has('owner_user_id')
         ? await resolveOwnerUser(sql, workspace.id, userId, input.owner_user_id)
         : existing.owner_user_id;

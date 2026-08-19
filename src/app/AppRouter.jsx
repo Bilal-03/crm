@@ -1,7 +1,7 @@
 import React, { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { ErrorBoundary } from '../ErrorBoundary.jsx';
-import { APP_ROUTES } from './routes.js';
+import { APP_ROUTE_PATHS } from './routes.js';
 
 const CRMApp = lazy(() => import('../../crm-system.jsx'));
 
@@ -28,7 +28,7 @@ export default function AppRouter() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      {APP_ROUTES.map(route => (
+      {APP_ROUTE_PATHS.map(route => (
         <Route key={route.id} path={route.path} element={<RoutedCRMApp />} />
       ))}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
