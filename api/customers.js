@@ -1,5 +1,13 @@
 import { getDb } from '../server/db.js';
-import { getPagination, json, paginated, withApiRoute } from '../server/http.js';
+import {
+  getPagination,
+  getQueryString,
+  getSort,
+  json,
+  paginated,
+  stripTotalCount,
+  withApiRoute,
+} from '../server/http.js';
 import { validateCustomer } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
 
@@ -10,15 +18,24 @@ export default withApiRoute({
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
 
     if (req.method === 'GET') {
-      const { limit, offset } = getPagination(req.query);
+      const pagination = getPagination(req.query);
+      const search = getQueryString(req.query, 'search');
+      const orderBy = getSort(req.query, {
+        created: 'created_at',
+        updated: 'updated_at',
+        name: 'name',
+        company: 'company',
+      }, 'created');
       const rows = await sql`
-        SELECT id, name, company, email, phone, created_at, updated_at
+        SELECT id, name, company, email, phone, created_at, updated_at, COUNT(*) OVER() AS __total_count
         FROM customers
         WHERE workspace_id = ${workspace.id}
-        ORDER BY created_at DESC, id DESC
-        LIMIT ${limit + 1} OFFSET ${offset}
+          AND (${search}::text IS NULL OR name ILIKE ${search ? `%${search}%` : null} OR company ILIKE ${search ? `%${search}%` : null} OR email ILIKE ${search ? `%${search}%` : null} OR phone ILIKE ${search ? `%${search}%` : null})
+        ORDER BY ${sql.unsafe(orderBy)}
+        LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
       `;
-      return json(res, 200, paginated(rows, limit, offset));
+      const result = stripTotalCount(rows);
+      return json(res, 200, paginated(result.data, pagination, result.total));
     }
 
     const customer = validateCustomer(req.body);

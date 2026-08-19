@@ -53,7 +53,7 @@ export function validateCustomer(body) {
   };
 }
 
-export function validateInvoice(body, { partial = false } = {}) {
+export function validateInvoice(body, { partial = false, allowAmountPaid = true } = {}) {
   const input = object(body);
   const result = {};
 
@@ -65,12 +65,37 @@ export function validateInvoice(body, { partial = false } = {}) {
   assign(result, 'items', invoiceItems(input.items, { required: !partial }));
   assign(result, 'tax_rate', number(input, 'tax_rate', { min: 0, max: 100, defaultValue: partial ? undefined : 0 }));
   assign(result, 'discount_amount', number(input, 'discount_amount', { min: 0, max: 1_000_000_000, defaultValue: partial ? undefined : 0 }));
-  assign(result, 'amount_paid', number(input, 'amount_paid', { min: 0, max: 1_000_000_000, defaultValue: partial ? undefined : 0 }));
+  if (allowAmountPaid) {
+    assign(result, 'amount_paid', number(input, 'amount_paid', { min: 0, max: 1_000_000_000, defaultValue: partial ? undefined : 0 }));
+  } else if (Object.prototype.hasOwnProperty.call(input, 'amount_paid')) {
+    invalid('amount_paid', 'cannot be changed while editing an invoice; record a payment instead');
+  }
   assign(result, 'notes', nullableString(input, 'notes', 10_000));
   assign(result, 'terms', nullableString(input, 'terms', 10_000));
 
   requireFieldsForUpdate(result, partial);
   return result;
+}
+
+export function validateBulkLeadOperation(body) {
+  const input = object(body);
+  const action = enumeration(input, 'action', ['update', 'delete'], { defaultValue: 'update' });
+  if (!Array.isArray(input.ids) || input.ids.length < 1 || input.ids.length > 100) {
+    invalid('ids', 'must contain between 1 and 100 lead IDs');
+  }
+  const ids = [...new Set(input.ids)];
+  if (ids.length !== input.ids.length) invalid('ids', 'must not contain duplicate IDs');
+  ids.forEach((id, index) => {
+    if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+      invalid(`ids[${index}]`, 'must be a valid UUID');
+    }
+  });
+  const updateInput = action === 'update' ? object(input.updates || {}) : {};
+  const stage = action === 'update'
+    ? enumeration(updateInput, 'stage', LEAD_STAGES)
+    : undefined;
+  if (action === 'update' && stage === undefined) invalid('updates.stage', 'is required');
+  return { action, ids, stage };
 }
 
 export function calculateInvoiceTotals(items, taxRate = 0, discountAmount = 0, amountPaid = 0) {

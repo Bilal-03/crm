@@ -8,7 +8,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "npm run build"
+    "lint": "node scripts/lint.mjs",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:api": "node --test tests/api/*.test.js",
+    "test": "npm run test:unit && npm run test:api",
+    "check": "npm run lint && npm run test && npm run build",
+    "smoke:fresh-db": "node scripts/smoke-fresh-db.mjs"
   },
   "engines": {
     "node": ">=20"

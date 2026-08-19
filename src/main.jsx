@@ -6,12 +6,13 @@ import { ClerkProvider } from '@clerk/clerk-react'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+const isProductionTestKey = import.meta.env.PROD && PUBLISHABLE_KEY?.startsWith('pk_test_')
 
 const root = ReactDOM.createRoot(document.getElementById('root'))
 
 root.render(
   <React.StrictMode>
-    {PUBLISHABLE_KEY ? (
+    {PUBLISHABLE_KEY && !isProductionTestKey ? (
       <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
         <ErrorBoundary>
           <CRMApp />
@@ -21,7 +22,11 @@ root.render(
       <main className="min-h-screen grid place-items-center bg-gray-50 p-6">
         <section className="max-w-lg rounded-2xl border border-red-200 bg-white p-8 shadow-sm">
           <h1 className="text-xl font-bold text-gray-900">Application configuration is incomplete</h1>
-          <p className="mt-2 text-gray-600">Set VITE_CLERK_PUBLISHABLE_KEY and rebuild the application.</p>
+          <p className="mt-2 text-gray-600">
+            {isProductionTestKey
+              ? 'Production builds must use a live Clerk publishable key (pk_live_…).'
+              : 'Set VITE_CLERK_PUBLISHABLE_KEY and rebuild the application.'}
+          </p>
         </section>
       </main>
     )}

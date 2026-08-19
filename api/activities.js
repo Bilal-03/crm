@@ -1,5 +1,15 @@
 import { getDb } from '../server/db.js';
-import { getPagination, HttpError, json, paginated, withApiRoute } from '../server/http.js';
+import {
+  getPagination,
+  getQueryDate,
+  getQueryString,
+  getSort,
+  HttpError,
+  json,
+  paginated,
+  stripTotalCount,
+  withApiRoute,
+} from '../server/http.js';
 import { validateActivity } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
 
@@ -10,15 +20,28 @@ export default withApiRoute({
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
 
     if (req.method === 'GET') {
-      const { limit, offset } = getPagination(req.query);
+      const pagination = getPagination(req.query);
+      const search = getQueryString(req.query, 'search');
+      const type = getQueryString(req.query, 'type', 80);
+      const from = getQueryDate(req.query, 'from');
+      const to = getQueryDate(req.query, 'to');
+      const orderBy = getSort(req.query, {
+        timestamp: 'timestamp',
+        type: 'type',
+      }, 'timestamp');
       const rows = await sql`
-        SELECT id, lead_id, type, message, timestamp
+        SELECT id, lead_id, type, message, timestamp, COUNT(*) OVER() AS __total_count
         FROM activities
         WHERE workspace_id = ${workspace.id}
-        ORDER BY timestamp DESC, id DESC
-        LIMIT ${limit + 1} OFFSET ${offset}
+          AND (${search}::text IS NULL OR type ILIKE ${search ? `%${search}%` : null} OR message ILIKE ${search ? `%${search}%` : null})
+          AND (${type}::text IS NULL OR type = ${type})
+          AND (${from}::date IS NULL OR timestamp >= ${from}::date)
+          AND (${to}::date IS NULL OR timestamp < (${to}::date + INTERVAL '1 day'))
+        ORDER BY ${sql.unsafe(orderBy)}
+        LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
       `;
-      return json(res, 200, paginated(rows, limit, offset));
+      const result = stripTotalCount(rows);
+      return json(res, 200, paginated(result.data, pagination, result.total));
     }
 
     const activity = validateActivity(req.body);

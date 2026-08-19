@@ -60,7 +60,7 @@ if (typeof document !== 'undefined') {
 }
 
 import { useAuth, useClerk, useUser, SignIn } from '@clerk/clerk-react';
-import { createApiClient } from './src/lib/api-client.js';
+import { createApiClient, fetchAllPages } from './src/lib/api-client.js';
 
 let pdfLibrariesPromise;
 const loadPdfLibraries = () => {
@@ -400,6 +400,11 @@ export default function CRMApp() {
   const [activities, setActivities] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [customerRecords, setCustomerRecords] = useState([]);
+  const [dashboardData, setDashboardData] = useState(null);
+  const [dashboardTrendRange, setDashboardTrendRange] = useState('7');
+  const [reportData, setReportData] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportRangeDays, setReportRangeDays] = useState(30);
   
   // UI states
   const [selectedLead, setSelectedLead] = useState(null);
@@ -419,6 +424,8 @@ export default function CRMApp() {
   const notify = (message, type = 'success') => {
     setToast({ message, type });
   };
+
+  const invalidateDashboard = () => setDashboardData(null);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -458,14 +465,15 @@ export default function CRMApp() {
   // 2. Fetch Data Helper (With Data Mapping)
   const fetchData = async (userId) => {
     setLoading(true);
+    setDashboardData(null);
     try {
       const resources = ['leads', 'meetings', 'activities', 'invoices', 'customers'];
       const results = await Promise.allSettled([
-        fetchApi('/leads'),
-        fetchApi('/meetings'),
-        fetchApi('/activities?limit=50'),
-        fetchApi('/invoices'),
-        fetchApi('/customers'),
+        fetchAllPages(api, '/leads'),
+        fetchAllPages(api, '/meetings'),
+        fetchAllPages(api, '/activities'),
+        fetchAllPages(api, '/invoices'),
+        fetchAllPages(api, '/customers'),
       ]);
       const failures = results
         .map((result, index) => result.status === 'rejected'
@@ -512,6 +520,40 @@ export default function CRMApp() {
     }
   };
 
+  useEffect(() => {
+    if (!user || currentPage !== 'dashboard') return undefined;
+    let cancelled = false;
+    fetchApi(`/dashboard?trendDays=${dashboardTrendRange}`)
+      .then(result => {
+        if (!cancelled) setDashboardData(result);
+      })
+      .catch(error => {
+        if (!cancelled) console.error('Error loading dashboard aggregates:', error);
+      });
+    return () => { cancelled = true; };
+  }, [user, activeWorkspaceId, currentPage, dashboardTrendRange, fetchApi]);
+
+  useEffect(() => {
+    if (!user || currentPage !== 'reports') return undefined;
+    let cancelled = false;
+    setReportData(null);
+    setReportLoading(true);
+    fetchApi(`/reports?rangeDays=${reportRangeDays}`)
+      .then(result => {
+        if (!cancelled) setReportData(result);
+      })
+      .catch(error => {
+        if (!cancelled) {
+          console.error('Error loading reports:', error);
+          notify(error.message || 'Reports could not be loaded.', 'error');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReportLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [user, activeWorkspaceId, currentPage, reportRangeDays, fetchApi]);
+
   const refreshTeam = async () => {
     try {
       const [team, invitations] = await Promise.all([
@@ -543,7 +585,7 @@ export default function CRMApp() {
   // Fetch customers
   const fetchCustomers = async () => {
     try {
-      const customersData = await fetchApi('/customers');
+      const customersData = await fetchAllPages(api, '/customers');
       setCustomerRecords(customersData || []);
     } catch (error) {
       console.error('Error fetching customers:', error);
@@ -637,6 +679,7 @@ export default function CRMApp() {
         quoteItems: data.quote_items
       };
       setLeads(prev => [newLead, ...prev]);
+      invalidateDashboard();
       addActivity('lead_created', `New lead added: ${leadData.name}`);
       notify('Lead created successfully.');
     }
@@ -661,6 +704,7 @@ export default function CRMApp() {
       setLeads(prev => prev.map(lead => 
         lead.id === leadId ? { ...lead, ...updates, quoteItems: data.quote_items } : lead
       ));
+      invalidateDashboard();
       addActivity('lead_updated', `Lead updated`, leadId);
       notify('Lead updated successfully.');
     }
@@ -677,6 +721,7 @@ export default function CRMApp() {
       setLeads(previousLeads);
       notify(error.message || 'Failed to delete lead.', 'error');
     } else {
+      invalidateDashboard();
       addActivity('lead_deleted', 'Lead deleted');
       notify('Lead deleted.');
     }
@@ -684,8 +729,12 @@ export default function CRMApp() {
 
   const bulkUpdateLeads = async (leadIds, stage) => {
     try {
-      await Promise.all(leadIds.map(leadId => fetchApi(`/leads?id=${leadId}`, { method: 'PUT', body: { stage } })));
+      await fetchApi('/leads/bulk', {
+        method: 'POST',
+        body: { action: 'update', ids: leadIds, updates: { stage } },
+      });
       setLeads(prev => prev.map(lead => leadIds.includes(lead.id) ? { ...lead, stage } : lead));
+      invalidateDashboard();
       addActivity('leads_bulk_updated', `${leadIds.length} leads moved to ${PIPELINE_STAGES.find(item => item.id === stage)?.label || stage}`);
       notify(`${leadIds.length} lead${leadIds.length === 1 ? '' : 's'} updated.`);
     } catch (error) {
@@ -698,7 +747,11 @@ export default function CRMApp() {
     const previousLeads = leads;
     setLeads(prev => prev.filter(lead => !leadIds.includes(lead.id)));
     try {
-      await Promise.all(leadIds.map(leadId => fetchApi(`/leads?id=${leadId}`, { method: 'DELETE' })));
+      await fetchApi('/leads/bulk', {
+        method: 'POST',
+        body: { action: 'delete', ids: leadIds },
+      });
+      invalidateDashboard();
       addActivity('leads_bulk_deleted', `${leadIds.length} leads deleted`);
       notify(`${leadIds.length} lead${leadIds.length === 1 ? '' : 's'} deleted.`);
     } catch (error) {
@@ -727,7 +780,10 @@ export default function CRMApp() {
       setLeads(prev => prev.map(item => item.id === leadId ? lead : item));
       console.error('Error adding note:', error);
     }
-    else addActivity('note_added', `Note added to lead`, leadId);
+    else {
+      invalidateDashboard();
+      addActivity('note_added', `Note added to lead`, leadId);
+    }
   };
 
   const addReminder = async (leadId, reminderData) => {
@@ -750,7 +806,10 @@ export default function CRMApp() {
       setLeads(prev => prev.map(item => item.id === leadId ? lead : item));
       console.error('Error adding reminder:', error);
     }
-    else addActivity('reminder_set', `Follow-up reminder set`, leadId);
+    else {
+      invalidateDashboard();
+      addActivity('reminder_set', `Follow-up reminder set`, leadId);
+    }
   };
 
   const completeReminder = async (leadId, reminderId) => {
@@ -766,6 +825,7 @@ export default function CRMApp() {
 
     try {
       await fetchApi(`/leads?id=${leadId}`, { method: 'PUT', body: { reminders: updatedReminders } });
+      invalidateDashboard();
       addActivity('reminder_completed', `Follow-up completed for ${lead.name}`, leadId);
       notify('Follow-up marked complete.');
     } catch (error) {
@@ -800,6 +860,7 @@ export default function CRMApp() {
         createdAt: data.created_at
       };
       setMeetings(prev => [newMeeting, ...prev]);
+      invalidateDashboard();
       addActivity('meeting_scheduled', `Meeting scheduled: ${meetingData.title}`, meetingData.leadId);
       notify('Meeting scheduled successfully.');
     }
@@ -826,6 +887,7 @@ export default function CRMApp() {
           createdAt: data.created_at,
         } : meeting
       ));
+      invalidateDashboard();
       addActivity('meeting_updated', `Meeting updated`, updates.leadId);
       notify('Meeting updated successfully.');
     }
@@ -838,6 +900,7 @@ export default function CRMApp() {
       console.error('Error deleting meeting:', error);
       notify(error.message || 'Failed to delete meeting.', 'error');
     } else {
+      invalidateDashboard();
       addActivity('meeting_deleted', `Meeting deleted`);
       notify('Meeting deleted.');
     }
@@ -870,6 +933,7 @@ export default function CRMApp() {
 
       if (data) {
         setInvoices(prev => [data, ...prev]);
+        invalidateDashboard();
         setShowInvoiceModal(false);
         setSelectedInvoice(null);
         addActivity('invoice_created', `Invoice ${data.invoice_number} created`);
@@ -898,6 +962,7 @@ export default function CRMApp() {
 
     if (data) {
       setInvoices(prev => prev.map(inv => inv.id === invoiceId ? data : inv));
+      invalidateDashboard();
       setShowInvoiceModal(false);
       setSelectedInvoice(null);
       addActivity('invoice_updated', `Invoice ${data.invoice_number} updated`);
@@ -916,11 +981,12 @@ export default function CRMApp() {
 
     if (error) {
       console.error('Error deleting invoice:', error);
-      notify('Failed to delete invoice.', 'error');
+      notify(error.message || 'Failed to delete invoice.', 'error');
       return;
     }
 
     setInvoices(prev => prev.filter(inv => inv.id !== invoiceId));
+    invalidateDashboard();
     addActivity('invoice_deleted', `Invoice ${invoice?.invoice_number} deleted`);
     notify('Invoice deleted.');
   };
@@ -970,14 +1036,18 @@ export default function CRMApp() {
 
   // Calculate dashboard stats
   const stats = {
-    totalLeads: leads.length,
-    newLeads: leads.filter(l => l.stage === 'new').length,
-    qualified: leads.filter(l => l.stage === 'qualified').length,
-    proposals: leads.filter(l => l.stage === 'proposal').length,
-    closedWon: leads.filter(l => l.stage === 'closed-won').length,
-    upcomingMeetings: meetings.filter(m => new Date(m.dateTime).getTime() > new Date().getTime()).length,
-    overdueReminders: leads.reduce((count, lead) => {
-      return count + (lead.reminders || []).filter(r => 
+    totalLeads: dashboardData?.leads?.total ?? leads.length,
+    newLeads: dashboardData?.leads?.newThisMonth ?? leads.filter(lead => {
+      const created = new Date(lead.createdAt);
+      const now = new Date();
+      return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
+    }).length,
+    qualified: dashboardData?.leads?.qualified ?? leads.filter(l => l.stage === 'qualified').length,
+    proposals: dashboardData?.leads?.proposals ?? leads.filter(l => l.stage === 'proposal').length,
+    closedWon: dashboardData?.leads?.closedWon ?? leads.filter(l => l.stage === 'closed-won').length,
+    upcomingMeetings: dashboardData?.meetings?.upcoming ?? meetings.filter(m => new Date(m.dateTime).getTime() > new Date().getTime()).length,
+    overdueReminders: dashboardData?.reminders?.overdue ?? leads.reduce((count, lead) => {
+      return count + (lead.reminders || []).filter(r =>
         new Date(r.date) < new Date() && !r.completed
       ).length;
     }, 0)
@@ -1073,6 +1143,9 @@ export default function CRMApp() {
             {currentPage === 'dashboard' && (
               <Dashboard 
                 stats={stats}
+                summary={dashboardData}
+                trendRange={dashboardTrendRange}
+                onTrendRangeChange={setDashboardTrendRange}
                 activities={activities}
                 meetings={meetings}
                 leads={leads}
@@ -1162,7 +1235,12 @@ export default function CRMApp() {
             )}
 
             {currentPage === 'reports' && (
-              <ReportsPage leads={leads} invoices={invoices} meetings={meetings} />
+              <ReportsPage
+                reportData={reportData}
+                loading={reportLoading}
+                rangeDays={reportRangeDays}
+                onRangeChange={setReportRangeDays}
+              />
             )}
 
             {currentPage === 'team' && (
@@ -1459,12 +1537,12 @@ function PriorityAction({ icon: Icon, label, value, tone, onClick }) {
 }
 
 // Dashboard Component
-function Dashboard({ stats, activities, meetings, leads, invoices = [], customers = [], onNavigate, onAddLead }) {
-  const [trendRange, setTrendRange] = useState('7');
+function Dashboard({ stats, summary, trendRange = '7', onTrendRangeChange, activities, meetings, leads, invoices = [], customers = [], onNavigate, onAddLead }) {
   // Prepare Data for Charts
+  const stageCounts = new Map((summary?.stages || []).map(item => [item.stage, item.count]));
   const pipelineData = PIPELINE_STAGES.map(stage => ({
     name: stage.label,
-    count: leads.filter(l => l.stage === stage.id).length,
+    count: summary?.stages ? Number(stageCounts.get(stage.id) || 0) : leads.filter(l => l.stage === stage.id).length,
     color: stage.color
   }));
 
@@ -1483,20 +1561,20 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
 
   // Invoice Analytics
   const invoiceStats = {
-    total: invoices.length,
-    paid: invoices.filter(i => i.status === 'paid').length,
-    overdue: invoices.filter(i => {
+    total: summary?.invoices?.total ?? invoices.length,
+    paid: summary?.invoices?.paid ?? invoices.filter(i => i.status === 'paid').length,
+    overdue: summary?.invoices?.overdue ?? invoices.filter(i => {
       if (i.status === 'paid' || i.status === 'cancelled') return false;
       return new Date(i.due_date) < new Date();
     }).length,
-    draft: invoices.filter(i => i.status === 'draft').length,
-    totalRevenue: invoices
+    draft: summary?.invoices?.draft ?? invoices.filter(i => i.status === 'draft').length,
+    totalRevenue: summary?.invoices?.totalRevenue ?? invoices
       .filter(i => i.status === 'paid')
       .reduce((sum, i) => sum + parseFloat(i.total_amount || 0), 0),
-    outstanding: invoices
+    outstanding: summary?.invoices?.outstanding ?? invoices
       .filter(i => i.status !== 'paid' && i.status !== 'cancelled')
       .reduce((sum, i) => sum + parseFloat(i.balance_due || i.total_amount || 0), 0),
-    thisMonthRevenue: invoices
+    thisMonthRevenue: summary?.invoices?.thisMonthRevenue ?? invoices
       .filter(i => {
         if (i.status !== 'paid') return false;
         const paidDate = new Date(i.paid_at || i.invoice_date);
@@ -1509,28 +1587,33 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
 
   // Revenue Trend
   const trendDays = Number(trendRange);
-  const revenueTrendData = [...Array(trendDays)].map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (trendDays - 1 - i));
-    const dateStr = d.toISOString().split('T')[0];
-    
-    const dayRevenue = invoices
-      .filter(inv => {
-        if (inv.status !== 'paid') return false;
-        const invDate = (inv.paid_at || inv.invoice_date).split('T')[0];
-        return invDate === dateStr;
-      })
-      .reduce((sum, inv) => sum + parseFloat(inv.total_amount || 0), 0);
+  const revenueTrendData = summary?.revenueTrend?.length === trendDays
+    ? summary.revenueTrend.map(item => ({
+      ...item,
+      date: new Date(`${item.date}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    }))
+    : [...Array(trendDays)].map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (trendDays - 1 - i));
+      const dateStr = d.toISOString().split('T')[0];
 
-    return {
-      date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      revenue: dayRevenue,
-      leads: leads.filter(l => {
-        const leadDate = new Date(l.createdAt).toISOString().split('T')[0];
-        return leadDate === dateStr;
-      }).length
-    };
-  });
+      const dayRevenue = invoices
+        .filter(inv => {
+          if (inv.status !== 'paid') return false;
+          const invDate = (inv.paid_at || inv.invoice_date).split('T')[0];
+          return invDate === dateStr;
+        })
+        .reduce((sum, inv) => sum + parseFloat(inv.total_amount || 0), 0);
+
+      return {
+        date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        revenue: dayRevenue,
+        leads: leads.filter(l => {
+          const leadDate = new Date(l.createdAt).toISOString().split('T')[0];
+          return leadDate === dateStr;
+        }).length
+      };
+    });
 
   // Overdue Invoices
   const overdueInvoices = invoices.filter(i => {
@@ -1809,7 +1892,7 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
               <select
                 aria-label="Trend time range"
                 value={trendRange}
-                onChange={(event) => setTrendRange(event.target.value)}
+                onChange={(event) => onTrendRangeChange?.(event.target.value)}
                 className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-medium text-gray-700 focus:ring-2 focus:ring-[#6366F1]"
               >
                 <option value="7">7 days</option>
@@ -2249,33 +2332,16 @@ function Dashboard({ stats, activities, meetings, leads, invoices = [], customer
   );
 }
 
-function ReportsPage({ leads, invoices, meetings }) {
-  const [rangeDays, setRangeDays] = useState(30);
-  const rangeStart = new Date();
-  rangeStart.setHours(0, 0, 0, 0);
-  rangeStart.setDate(rangeStart.getDate() - (rangeDays - 1));
-
-  const leadsInRange = leads.filter(lead => new Date(lead.createdAt) >= rangeStart);
-  const invoicesInRange = invoices.filter(invoice => {
-    const paymentDate = invoice.paid_at || invoice.invoice_date;
-    return invoice.status === 'paid' && paymentDate && new Date(paymentDate) >= rangeStart;
-  });
-  const meetingsInRange = meetings.filter(meeting => new Date(meeting.dateTime) >= rangeStart);
-  const wonInRange = leadsInRange.filter(lead => lead.stage === 'closed-won').length;
-  const closedInRange = leadsInRange.filter(lead => ['closed-won', 'closed-lost'].includes(lead.stage)).length;
-  const conversionRate = closedInRange ? Math.round((wonInRange / closedInRange) * 100) : 0;
-  const revenue = invoicesInRange.reduce((sum, invoice) => sum + Number(invoice.total_amount || 0), 0);
-
-  const sourceData = Object.entries(leadsInRange.reduce((sources, lead) => {
-    const source = lead.source || 'Unknown';
-    sources[source] = (sources[source] || 0) + 1;
-    return sources;
-  }, {})).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 6);
+function ReportsPage({ reportData, loading, rangeDays, onRangeChange }) {
+  const metrics = reportData?.metrics || {};
+  const sourceData = reportData?.sourceData || [];
+  const stageCounts = new Map((reportData?.funnelData || []).map(item => [item.stage, item.count]));
   const funnelData = PIPELINE_STAGES.map(stage => ({
     name: stage.label,
-    count: leadsInRange.filter(lead => lead.stage === stage.id).length,
+    count: Number(stageCounts.get(stage.id) || 0),
     color: stage.color,
   }));
+  const hasFunnelData = funnelData.some(item => item.count > 0);
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -2283,7 +2349,7 @@ function ReportsPage({ leads, invoices, meetings }) {
         title="Reports"
         description="Measure the lead, pipeline, and revenue signals that guide your next decisions."
         actions={(
-          <select aria-label="Reporting period" value={rangeDays} onChange={event => setRangeDays(Number(event.target.value))} className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 focus:ring-2 focus:ring-[#6366F1]">
+          <select aria-label="Reporting period" value={rangeDays} onChange={event => onRangeChange(Number(event.target.value))} className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 focus:ring-2 focus:ring-[#6366F1]">
             <option value={30}>Last 30 days</option>
             <option value={90}>Last 90 days</option>
             <option value={365}>Last 12 months</option>
@@ -2291,11 +2357,13 @@ function ReportsPage({ leads, invoices, meetings }) {
         )}
       />
 
+      {loading && <p className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-800">Loading trusted report totals…</p>}
+
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Report summary">
-        <StatCard label="New leads" value={leadsInRange.length} icon={Users} color="#6366F1" />
-        <StatCard label="Deals won" value={wonInRange} icon={CheckCircle2} color="#10B981" />
-        <StatCard label="Close rate" value={`${conversionRate}%`} icon={TrendingUp} color="#8B5CF6" />
-        <StatCard label="Revenue collected" value={`$${revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={DollarSign} color="#059669" />
+        <StatCard label="New leads" value={metrics.newLeads ?? 0} icon={Users} color="#6366F1" />
+        <StatCard label="Deals won" value={metrics.dealsWon ?? 0} icon={CheckCircle2} color="#10B981" />
+        <StatCard label="Close rate" value={`${metrics.closeRate ?? 0}%`} icon={TrendingUp} color="#8B5CF6" />
+        <StatCard label="Revenue collected" value={`$${Number(metrics.revenueCollected || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={DollarSign} color="#059669" />
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
@@ -2314,15 +2382,15 @@ function ReportsPage({ leads, invoices, meetings }) {
                 <Bar dataKey="count" name="Leads" fill="#6366F1" radius={[0, 6, 6, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          ) : <p className="py-24 text-center text-sm text-gray-500">No leads in this reporting period.</p>}
+          ) : <p className="py-24 text-center text-sm text-gray-500">No leads were created in this reporting period.</p>}
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-5">
             <h2 className="text-lg font-bold text-gray-900">Pipeline funnel</h2>
-            <p className="mt-1 text-sm text-gray-500">How new leads are currently distributed by stage.</p>
+            <p className="mt-1 text-sm text-gray-500">Current lead stage distribution across the workspace.</p>
           </div>
-          {leadsInRange.length ? (
+          {hasFunnelData ? (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={funnelData} margin={{ top: 8, right: 8, left: -20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -2332,16 +2400,16 @@ function ReportsPage({ leads, invoices, meetings }) {
                 <Bar dataKey="count" name="Leads" fill="#8B5CF6" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          ) : <p className="py-24 text-center text-sm text-gray-500">Add leads to begin tracking the funnel.</p>}
+          ) : <p className="py-24 text-center text-sm text-gray-500">Add leads to begin tracking stage distribution.</p>}
         </div>
       </section>
 
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
         <h2 className="text-lg font-bold text-gray-900">Activity snapshot</h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Meetings scheduled</p><p className="mt-2 text-2xl font-bold text-gray-900">{meetingsInRange.length}</p></div>
-          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Paid invoices</p><p className="mt-2 text-2xl font-bold text-gray-900">{invoicesInRange.length}</p></div>
-          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Average leads / day</p><p className="mt-2 text-2xl font-bold text-gray-900">{(leadsInRange.length / rangeDays).toFixed(1)}</p></div>
+          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Meetings scheduled</p><p className="mt-2 text-2xl font-bold text-gray-900">{metrics.meetingsScheduled ?? 0}</p></div>
+          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Paid invoices</p><p className="mt-2 text-2xl font-bold text-gray-900">{metrics.paidInvoices ?? 0}</p></div>
+          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Average leads / day</p><p className="mt-2 text-2xl font-bold text-gray-900">{Number(metrics.averageLeadsPerDay || 0).toFixed(1)}</p></div>
         </div>
       </section>
     </motion.div>
@@ -4411,6 +4479,7 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
                 filteredInvoices.map(invoice => {
                   const customer = customers.find(c => c.id === invoice.customer_id);
                   const isOverdue = new Date(invoice.due_date) < new Date() && invoice.status !== 'paid';
+                  const canDelete = invoice.status === 'draft' && Number(invoice.amount_paid || 0) === 0;
                   
                   return (
                     <motion.tr
@@ -4493,12 +4562,13 @@ function InvoicesPage({ invoices, customers, onCreateInvoice, onEditInvoice, onD
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm('Delete this invoice?')) {
+                              if (canDelete && confirm('Delete this invoice?')) {
                                 onDeleteInvoice(invoice.id);
                               }
                             }}
-                            className="p-2 hover:bg-red-50 rounded-lg transition-colors text-red-600"
-                            title="Delete"
+                            disabled={!canDelete}
+                            className="p-2 rounded-lg text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent"
+                            title={canDelete ? 'Delete draft invoice' : 'Sent, paid, or cancelled invoices cannot be deleted'}
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -4543,7 +4613,7 @@ function InvoiceModal({ invoice, customers, onClose, onSave }) {
         due_date: invoice.due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: invoice.status || 'draft',
         items: invoice.items || [{ description: '', quantity: 1, rate: 0, amount: 0 }],
-        tax_rate: invoice.tax_rate || 10,
+        tax_rate: invoice.tax_rate ?? 10,
         discount_amount: invoice.discount_amount || 0,
         notes: invoice.notes || '',
         terms: invoice.terms || 'Payment is due within 30 days'
@@ -4629,8 +4699,6 @@ function InvoiceModal({ invoice, customers, onClose, onSave }) {
       subtotal: parseFloat(totals.subtotal),
       tax_amount: parseFloat(totals.taxAmount),
       total_amount: parseFloat(totals.total),
-      balance_due: parseFloat(totals.total),
-      amount_paid: 0
     };
 
     onSave(invoiceData);

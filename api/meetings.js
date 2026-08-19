@@ -1,5 +1,17 @@
 import { getDb } from '../server/db.js';
-import { getPagination, getRequiredId, HttpError, json, noContent, paginated, withApiRoute } from '../server/http.js';
+import {
+  getPagination,
+  getQueryDate,
+  getQueryString,
+  getRequiredId,
+  getSort,
+  HttpError,
+  json,
+  noContent,
+  paginated,
+  stripTotalCount,
+  withApiRoute,
+} from '../server/http.js';
 import { validateMeeting } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
 
@@ -10,15 +22,27 @@ export default withApiRoute({
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
 
     if (req.method === 'GET') {
-      const { limit, offset } = getPagination(req.query);
+      const pagination = getPagination(req.query);
+      const search = getQueryString(req.query, 'search');
+      const from = getQueryDate(req.query, 'from');
+      const to = getQueryDate(req.query, 'to');
+      const orderBy = getSort(req.query, {
+        date: 'date_time',
+        created: 'created_at',
+        title: 'title',
+      }, 'date', 'asc');
       const rows = await sql`
-        SELECT id, lead_id, title, date_time, notes, created_at, updated_at
+        SELECT id, lead_id, title, date_time, notes, created_at, updated_at, COUNT(*) OVER() AS __total_count
         FROM meetings
         WHERE workspace_id = ${workspace.id}
-        ORDER BY date_time ASC, id ASC
-        LIMIT ${limit + 1} OFFSET ${offset}
+          AND (${search}::text IS NULL OR title ILIKE ${search ? `%${search}%` : null} OR notes ILIKE ${search ? `%${search}%` : null})
+          AND (${from}::date IS NULL OR date_time >= ${from}::date)
+          AND (${to}::date IS NULL OR date_time < (${to}::date + INTERVAL '1 day'))
+        ORDER BY ${sql.unsafe(orderBy)}
+        LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
       `;
-      return json(res, 200, paginated(rows, limit, offset));
+      const result = stripTotalCount(rows);
+      return json(res, 200, paginated(result.data, pagination, result.total));
     }
 
     if (req.method === 'POST') {

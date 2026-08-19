@@ -1,7 +1,13 @@
 -- CRM Pro production schema for a fresh PostgreSQL/Neon database.
--- Existing installations should apply migrations/002_production_hardening.sql instead.
+-- Existing installations should apply migrations/002_production_hardening.sql through
+-- migrations/005_phase0_data_correctness.sql in order instead.
 
 BEGIN;
+
+CREATE TABLE schema_migrations (
+  version VARCHAR(64) PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE workspaces (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -14,10 +20,23 @@ CREATE TABLE workspaces (
 CREATE TABLE workspace_members (
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
+  email VARCHAR(320),
   role VARCHAR(16) NOT NULL DEFAULT 'member'
     CHECK (role IN ('owner', 'admin', 'member')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (workspace_id, user_id)
+);
+
+CREATE TABLE workspace_invitations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  email VARCHAR(320) NOT NULL,
+  role VARCHAR(16) NOT NULL CHECK (role IN ('admin', 'member')),
+  invited_by_user_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '14 days',
+  accepted_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ
 );
 
 CREATE TABLE leads (
@@ -34,6 +53,8 @@ CREATE TABLE leads (
   notes JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(notes) = 'array'),
   reminders JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(reminders) = 'array'),
   quote_items JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(quote_items) = 'array'),
+  won_at TIMESTAMPTZ,
+  lost_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (id, workspace_id)
@@ -108,10 +129,23 @@ CREATE TABLE invoices (
 
 CREATE INDEX leads_workspace_created_idx ON leads (workspace_id, created_at DESC, id DESC);
 CREATE INDEX leads_workspace_stage_idx ON leads (workspace_id, stage, created_at DESC);
+CREATE INDEX leads_workspace_won_idx ON leads (workspace_id, won_at DESC, id DESC);
+CREATE INDEX leads_workspace_lost_idx ON leads (workspace_id, lost_at DESC, id DESC);
 CREATE INDEX meetings_workspace_date_idx ON meetings (workspace_id, date_time, id);
 CREATE INDEX activities_workspace_timestamp_idx ON activities (workspace_id, timestamp DESC, id DESC);
 CREATE INDEX customers_workspace_created_idx ON customers (workspace_id, created_at DESC, id DESC);
 CREATE INDEX invoices_workspace_created_idx ON invoices (workspace_id, created_at DESC, id DESC);
 CREATE INDEX invoices_workspace_status_due_idx ON invoices (workspace_id, status, due_date);
+CREATE INDEX workspace_members_user_idx ON workspace_members (user_id, workspace_id);
+CREATE UNIQUE INDEX workspace_invitations_pending_email_unique_idx
+  ON workspace_invitations (workspace_id, lower(email))
+  WHERE accepted_at IS NULL AND revoked_at IS NULL;
+CREATE INDEX workspace_invitations_email_idx ON workspace_invitations (lower(email), expires_at);
+
+INSERT INTO schema_migrations (version) VALUES
+  ('002_production_hardening'),
+  ('003_workspace_foundation'),
+  ('004_team_settings'),
+  ('005_phase0_data_correctness');
 
 COMMIT;

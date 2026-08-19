@@ -1,5 +1,17 @@
 import { getDb } from '../server/db.js';
-import { getPagination, getRequiredId, HttpError, json, noContent, paginated, withApiRoute } from '../server/http.js';
+import {
+  getPagination,
+  getQueryEnum,
+  getQueryString,
+  getRequiredId,
+  getSort,
+  HttpError,
+  json,
+  noContent,
+  paginated,
+  stripTotalCount,
+  withApiRoute,
+} from '../server/http.js';
 import { validateLead } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
 
@@ -10,27 +22,46 @@ export default withApiRoute({
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
 
     if (req.method === 'GET') {
-      const { limit, offset } = getPagination(req.query);
+      const pagination = getPagination(req.query);
+      const search = getQueryString(req.query, 'search');
+      const stage = getQueryEnum(req.query, 'stage', ['new', 'qualified', 'follow-up', 'proposal', 'closed-won', 'closed-lost']);
+      const source = getQueryString(req.query, 'source', 80);
+      const owner = getQueryString(req.query, 'owner', 256);
+      const orderBy = getSort(req.query, {
+        created: 'created_at',
+        updated: 'updated_at',
+        name: 'name',
+        stage: 'stage',
+      }, 'created');
       const rows = await sql`
-        SELECT id, name, company, email, phone, source, stage, notes, reminders, quote_items, created_at, updated_at
+        SELECT id, name, company, email, phone, source, stage, notes, reminders, quote_items,
+               created_at, updated_at, won_at, lost_at, COUNT(*) OVER() AS __total_count
         FROM leads
         WHERE workspace_id = ${workspace.id}
-        ORDER BY created_at DESC, id DESC
-        LIMIT ${limit + 1} OFFSET ${offset}
+          AND (${search}::text IS NULL OR name ILIKE ${search ? `%${search}%` : null} OR company ILIKE ${search ? `%${search}%` : null} OR email ILIKE ${search ? `%${search}%` : null} OR source ILIKE ${search ? `%${search}%` : null})
+          AND (${stage}::text IS NULL OR stage = ${stage})
+          AND (${source}::text IS NULL OR source = ${source})
+          AND (${owner}::text IS NULL OR user_id = ${owner})
+        ORDER BY ${sql.unsafe(orderBy)}
+        LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
       `;
-      return json(res, 200, paginated(rows, limit, offset));
+      const result = stripTotalCount(rows);
+      return json(res, 200, paginated(result.data, pagination, result.total));
     }
 
     if (req.method === 'POST') {
       const lead = validateLead(req.body);
       const rows = await sql`
-        INSERT INTO leads (workspace_id, user_id, name, company, email, phone, source, stage, notes, reminders, quote_items)
+        INSERT INTO leads (workspace_id, user_id, name, company, email, phone, source, stage, notes, reminders, quote_items, won_at, lost_at)
         VALUES (
           ${workspace.id}, ${userId}, ${lead.name}, ${lead.company ?? null}, ${lead.email}, ${lead.phone ?? null},
           ${lead.source ?? null}, ${lead.stage}, ${JSON.stringify(lead.notes ?? [])},
-          ${JSON.stringify(lead.reminders ?? [])}, ${JSON.stringify(lead.quote_items ?? [])}
+          ${JSON.stringify(lead.reminders ?? [])}, ${JSON.stringify(lead.quote_items ?? [])},
+          ${lead.stage === 'closed-won' ? new Date().toISOString() : null},
+          ${lead.stage === 'closed-lost' ? new Date().toISOString() : null}
         )
-        RETURNING id, name, company, email, phone, source, stage, notes, reminders, quote_items, created_at, updated_at
+        RETURNING id, name, company, email, phone, source, stage, notes, reminders, quote_items,
+                  created_at, updated_at, won_at, lost_at
       `;
       return json(res, 201, { data: rows[0] });
     }
@@ -52,9 +83,20 @@ export default withApiRoute({
           notes = CASE WHEN ${has('notes')} THEN ${has('notes') ? JSON.stringify(lead.notes) : null}::jsonb ELSE notes END,
           reminders = CASE WHEN ${has('reminders')} THEN ${has('reminders') ? JSON.stringify(lead.reminders) : null}::jsonb ELSE reminders END,
           quote_items = CASE WHEN ${has('quote_items')} THEN ${has('quote_items') ? JSON.stringify(lead.quote_items) : null}::jsonb ELSE quote_items END,
+          won_at = CASE
+            WHEN ${has('stage') && lead.stage === 'closed-won'} THEN COALESCE(won_at, NOW())
+            WHEN ${has('stage')} THEN NULL
+            ELSE won_at
+          END,
+          lost_at = CASE
+            WHEN ${has('stage') && lead.stage === 'closed-lost'} THEN COALESCE(lost_at, NOW())
+            WHEN ${has('stage')} THEN NULL
+            ELSE lost_at
+          END,
           updated_at = NOW()
         WHERE id = ${id} AND workspace_id = ${workspace.id}
-        RETURNING id, name, company, email, phone, source, stage, notes, reminders, quote_items, created_at, updated_at
+        RETURNING id, name, company, email, phone, source, stage, notes, reminders, quote_items,
+                  created_at, updated_at, won_at, lost_at
       `;
       if (!rows[0]) throw new HttpError(404, 'not_found', 'Lead not found.');
       return json(res, 200, { data: rows[0] });

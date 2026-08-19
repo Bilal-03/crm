@@ -111,7 +111,21 @@ For an existing database created from the original prototype schema, create a ba
 psql "$NEON_DATABASE_URL" -f migrations/002_production_hardening.sql
 psql "$NEON_DATABASE_URL" -f migrations/003_workspace_foundation.sql
 psql "$NEON_DATABASE_URL" -f migrations/004_team_settings.sql
+psql "$NEON_DATABASE_URL" -f migrations/005_phase0_data_correctness.sql
 ```
+
+`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation and Phase 0 reporting structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
+
+After migration, validate the Phase 0 backfill with:
+
+```sql
+SELECT version, applied_at FROM schema_migrations ORDER BY version;
+SELECT COUNT(*) FILTER (WHERE stage = 'closed-won' AND won_at IS NULL) AS missing_won_dates,
+       COUNT(*) FILTER (WHERE stage = 'closed-lost' AND lost_at IS NULL) AS missing_lost_dates
+FROM leads;
+```
+
+Phase 0 adds nullable timestamps and does not drop or rewrite legacy records. If validation fails, stop deployment and restore the pre-migration snapshot; do not manually delete the new columns or tables from a live database.
 
 ### 4. Start the application
 
@@ -135,13 +149,18 @@ Open the local Vite URL shown in the terminal, normally `http://localhost:5173`.
 
 Use `.env.example` as the canonical variable list. Keep `.env`, `.env.local`, and production secret values out of Git.
 
+For local development, test Clerk keys (`pk_test_…` and `sk_test_…`) are expected. For the deployed production URL, configure a production Clerk instance with `pk_live_…` and `sk_live_…`, a verified Clerk production domain, and `CLERK_AUTHORIZED_PARTIES` set to the exact HTTPS origin (currently `https://crm-sepia-chi-24.vercel.app`). Do not commit either key. A test-key deployment is a release blocker.
+
 ## Available commands
 
 ```bash
 npm run dev       # Start the local Vite development server
 npm run build     # Create the optimized production bundle
 npm run preview   # Preview the production bundle locally
-npm run check     # Run the production build verification
+npm run lint      # Parse-check server, API, test, and utility JavaScript files
+npm run test      # Run unit and API contract tests
+npm run check     # Run lint, tests, and the production build verification
+npm run smoke:fresh-db # Verify the required Phase 0 schema on an isolated database
 ```
 
 ## API resources
@@ -153,6 +172,9 @@ npm run check     # Run the production build verification
 | `/api/meetings` | GET, POST, PUT, DELETE | Meeting scheduling and relationship ownership checks |
 | `/api/activities` | GET, POST | Activity timeline records |
 | `/api/invoices` | GET, POST, PUT, DELETE | Invoice lifecycle, totals, balances, and payment status |
+| `/api/leads/bulk` | POST | Transactional bulk lead update/delete |
+| `/api/dashboard` | GET | Tenant-scoped dashboard aggregates and trends |
+| `/api/reports` | GET | Tenant-scoped period report aggregates |
 | `/api/send-invoice-email` | POST | Generates and sends an invoice email through Resend |
 
 Collection responses use a consistent envelope:
@@ -161,13 +183,20 @@ Collection responses use a consistent envelope:
 {
   "data": [],
   "pagination": {
-    "limit": 50,
+    "page": 1,
+    "pageSize": 25,
+    "total": 500,
+    "totalPages": 20,
+    "hasMore": true,
+    "nextPage": 2,
+    "limit": 25,
     "offset": 0,
-    "hasMore": false,
-    "nextOffset": null
+    "nextOffset": 25
   }
 }
 ```
+
+Collection endpoints accept `page`, `pageSize`, `search`, resource-specific filters, `sort`, and `direction`. Legacy `limit`/`offset` parameters remain accepted during the Phase 0 compatibility window. The browser client retains pagination metadata and requests additional pages rather than silently treating the first page as the complete dataset.
 
 Errors use a safe message and request ID for server-log correlation:
 
@@ -190,7 +219,8 @@ The project is configured for Vercel deployment.
 3. Add every variable from `.env.example` to the Vercel project settings.
 4. Set `CLERK_AUTHORIZED_PARTIES` to the exact production origin.
 5. Apply `schema.sql` for a new database, or apply every reviewed migration in order before deploying API changes.
-6. Configure a verified Resend sender if invoice email is enabled.
-7. Deploy and verify sign-in, one CRUD flow per resource, tenant isolation, PDF generation, and invoice delivery.
+6. Configure production Clerk keys and the exact authorized party for the production origin; verify no Clerk development-mode warning appears.
+7. Configure a verified Resend sender if invoice email is enabled.
+8. Run `npm run smoke:fresh-db` against a dedicated database and verify sign-in, one CRUD flow per resource, tenant isolation, PDF generation, dashboard totals, report totals, and invoice delivery.
 
 Every push to the configured production branch can trigger a new deployment. Vercel also creates preview deployments for non-production branches when enabled.

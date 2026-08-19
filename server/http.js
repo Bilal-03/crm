@@ -26,24 +26,99 @@ export function noContent(res) {
   return res.end();
 }
 
-export function paginated(data, limit, offset) {
-  const hasMore = data.length > limit;
+export function paginated(data, { page = 1, pageSize = 50, offset = 0 } = {}, total = data.length) {
+  const hasMore = offset + data.length < total;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
   return {
-    data: hasMore ? data.slice(0, limit) : data,
+    data,
     pagination: {
-      limit,
+      page,
+      pageSize,
+      total,
+      totalPages,
       offset,
+      limit: pageSize,
       hasMore,
-      nextOffset: hasMore ? offset + limit : null,
+      nextPage: hasMore ? page + 1 : null,
+      nextOffset: hasMore ? offset + pageSize : null,
     },
   };
 }
 
 export function getPagination(query = {}) {
+  const pageSize = readBoundedInteger(
+    query.pageSize ?? query.limit,
+    50,
+    1,
+    100,
+    'pageSize',
+  );
+  const hasPage = query.page !== undefined;
+  const page = hasPage
+    ? readBoundedInteger(query.page, 1, 1, 100_000, 'page')
+    : 1;
+  const legacyOffset = readBoundedInteger(query.offset, 0, 0, 100_000, 'offset');
+  const offset = hasPage ? (page - 1) * pageSize : legacyOffset;
+
   return {
-    limit: readBoundedInteger(query.limit, 50, 1, 100, 'limit'),
-    offset: readBoundedInteger(query.offset, 0, 0, 100_000, 'offset'),
+    page: hasPage ? page : Math.floor(offset / pageSize) + 1,
+    pageSize,
+    limit: pageSize,
+    offset,
   };
+}
+
+export function getQueryString(query = {}, field, maxLength = 120) {
+  const value = Array.isArray(query[field]) ? query[field][0] : query[field];
+  if (value === undefined || value === '') return null;
+  if (typeof value !== 'string') {
+    throw new HttpError(400, 'invalid_query', `${field} must be a string.`);
+  }
+  const normalized = value.trim();
+  if (normalized.length > maxLength) {
+    throw new HttpError(400, 'invalid_query', `${field} must contain at most ${maxLength} characters.`);
+  }
+  return normalized || null;
+}
+
+export function getQueryEnum(query = {}, field, allowed) {
+  const value = getQueryString(query, field, 80);
+  if (value === null) return null;
+  if (!allowed.includes(value)) {
+    throw new HttpError(400, 'invalid_query', `${field} must be one of: ${allowed.join(', ')}.`);
+  }
+  return value;
+}
+
+export function getQueryInteger(query = {}, field, fallback, min, max) {
+  return readBoundedInteger(query[field], fallback, min, max, field);
+}
+
+export function getQueryDate(query = {}, field) {
+  const value = getQueryString(query, field, 10);
+  if (value === null) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    throw new HttpError(400, 'invalid_query', `${field} must be a valid date in YYYY-MM-DD format.`);
+  }
+  return value;
+}
+
+export function getSort(query = {}, allowed, fallback, fallbackDirection = 'desc', tieBreaker = 'id') {
+  const requested = getQueryString(query, 'sort', 40) || fallback;
+  if (!Object.prototype.hasOwnProperty.call(allowed, requested)) {
+    throw new HttpError(400, 'invalid_query', `sort must be one of: ${Object.keys(allowed).join(', ')}.`);
+  }
+  const direction = getQueryString(query, 'direction', 4) || fallbackDirection;
+  if (!['asc', 'desc'].includes(direction)) {
+    throw new HttpError(400, 'invalid_query', 'direction must be asc or desc.');
+  }
+  return `${allowed[requested]} ${direction.toUpperCase()}, ${tieBreaker} ${direction.toUpperCase()}`;
+}
+
+export function stripTotalCount(rows) {
+  const total = Number(rows[0]?.__total_count ?? 0);
+  const data = rows.map(({ __total_count: _totalCount, ...row }) => row);
+  return { data, total };
 }
 
 export function getRequiredId(query = {}) {
@@ -111,10 +186,18 @@ async function authenticate(req) {
     throw new Error('CLERK_SECRET_KEY or CLERK_JWT_KEY must be configured.');
   }
 
+  const isProduction = process.env.VERCEL_ENV === 'production' || process.env.NODE_ENV === 'production';
+  if (isProduction && secretKey?.startsWith('sk_test_')) {
+    throw new Error('Production Clerk authentication must use a live secret key.');
+  }
+
   const authorizedParties = process.env.CLERK_AUTHORIZED_PARTIES
     ?.split(',')
     .map(value => value.trim())
     .filter(Boolean);
+  if (isProduction && !authorizedParties?.length) {
+    throw new Error('CLERK_AUTHORIZED_PARTIES must be configured in production.');
+  }
 
   try {
     const verified = await verifyToken(match[1], {
