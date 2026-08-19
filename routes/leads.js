@@ -28,6 +28,7 @@ export default withApiRoute({
       const stage = getQueryEnum(req.query, 'stage', ['new', 'qualified', 'follow-up', 'proposal', 'closed-won', 'closed-lost']);
       const source = getQueryString(req.query, 'source', 80);
       const owner = getQueryString(req.query, 'owner', 256);
+      const ownerUserId = owner === 'me' ? userId : owner;
       const orderBy = getSort(req.query, {
         created: 'created_at',
         updated: 'updated_at',
@@ -35,14 +36,47 @@ export default withApiRoute({
         stage: 'stage',
       }, 'created');
       const rows = await sql`
-        SELECT id, name, company, email, phone, normalized_email, normalized_phone, source, stage, notes, reminders, quote_items,
+        SELECT id, name, company, email, phone, normalized_email, normalized_phone, source, stage,
+               COALESCE(
+                 (
+                   SELECT jsonb_agg(
+                     jsonb_build_object('id', n.id, 'text', n.body, 'timestamp', n.created_at)
+                     ORDER BY n.created_at DESC, n.id DESC
+                   )
+                   FROM record_notes n
+                   WHERE n.workspace_id = leads.workspace_id AND n.lead_id = leads.id
+                 ),
+                 notes
+               ) AS notes,
+               COALESCE(
+                 (
+                   SELECT jsonb_agg(
+                     jsonb_build_object(
+                       'id', COALESCE(a.legacy_source_id, a.id),
+                       'date', (timezone(${workspace.timezone}, a.due_at))::date,
+                       'note', a.subject,
+                       'createdAt', a.created_at,
+                       'completed', a.completed_at IS NOT NULL,
+                       'completedAt', a.completed_at
+                     )
+                     ORDER BY a.due_at ASC, a.id ASC
+                   )
+                   FROM activities a
+                   WHERE a.workspace_id = leads.workspace_id
+                     AND a.lead_id = leads.id
+                     AND a.type = 'task'
+                     AND a.due_at IS NOT NULL
+                 ),
+                 reminders
+               ) AS reminders,
+               quote_items,
                created_at, updated_at, won_at, lost_at, COUNT(*) OVER() AS __total_count
         FROM leads
         WHERE workspace_id = ${workspace.id}
           AND (${search}::text IS NULL OR name ILIKE ${search ? `%${search}%` : null} OR company ILIKE ${search ? `%${search}%` : null} OR email ILIKE ${search ? `%${search}%` : null} OR source ILIKE ${search ? `%${search}%` : null})
           AND (${stage}::text IS NULL OR stage = ${stage})
           AND (${source}::text IS NULL OR source = ${source})
-          AND (${owner}::text IS NULL OR user_id = ${owner})
+          AND (${ownerUserId}::text IS NULL OR user_id = ${ownerUserId})
         ORDER BY ${sql.unsafe(orderBy)}
         LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
       `;

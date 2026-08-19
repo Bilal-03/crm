@@ -28,6 +28,8 @@ export default withApiRoute({
       const pagination = getPagination(req.query);
       const search = getQueryString(req.query, 'search');
       const status = getQueryEnum(req.query, 'status', ['draft', 'sent', 'paid', 'overdue', 'partial', 'cancelled']);
+      const owner = getQueryString(req.query, 'owner', 256);
+      const ownerUserId = owner === 'me' ? userId : owner;
       const from = getQueryDate(req.query, 'from');
       const to = getQueryDate(req.query, 'to');
       const orderBy = getSort(req.query, {
@@ -45,6 +47,7 @@ export default withApiRoute({
         WHERE i.workspace_id = ${workspace.id}
           AND (${search}::text IS NULL OR i.invoice_number ILIKE ${search ? `%${search}%` : null} OR c.name ILIKE ${search ? `%${search}%` : null} OR c.company ILIKE ${search ? `%${search}%` : null})
           AND (${status}::text IS NULL OR i.status = ${status})
+          AND (${ownerUserId}::text IS NULL OR i.user_id = ${ownerUserId})
           AND (${from}::date IS NULL OR i.invoice_date >= ${from}::date)
           AND (${to}::date IS NULL OR i.invoice_date <= ${to}::date)
         ORDER BY ${sql.unsafe(orderBy)}

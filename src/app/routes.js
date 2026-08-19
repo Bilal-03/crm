@@ -5,6 +5,7 @@ export const APP_ROUTES = Object.freeze([
   { id: 'accounts', path: '/sales/accounts' },
   { id: 'deals', path: '/sales/deals' },
   { id: 'pipeline', path: '/sales/pipeline' },
+  { id: 'activities', path: '/activities' },
   { id: 'meetings', path: '/meetings' },
   { id: 'invoices', path: '/invoices' },
   { id: 'reports', path: '/reports' },
@@ -15,6 +16,7 @@ const LEGACY_ROUTES = Object.freeze([
   { path: '/leads', id: 'leads' },
   { path: '/clients', id: 'accounts' },
   { path: '/pipeline', id: 'pipeline' },
+  { path: '/my-day', id: 'activities' },
 ]);
 
 export const APP_ROUTE_PATHS = Object.freeze([...APP_ROUTES, ...LEGACY_ROUTES]);

@@ -114,9 +114,10 @@ psql "$NEON_DATABASE_URL" -f migrations/003_workspace_foundation.sql
 psql "$NEON_DATABASE_URL" -f migrations/004_team_settings.sql
 psql "$NEON_DATABASE_URL" -f migrations/005_phase0_data_correctness.sql
 psql "$NEON_DATABASE_URL" -f migrations/006_phase2_core_model.sql
+psql "$NEON_DATABASE_URL" -f migrations/007_phase4_productivity.sql
 ```
 
-`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation, Phase 0 reporting and Phase 2 CRM core structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
+`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation, Phase 0 reporting, Phase 2 CRM core and Phase 4 productivity structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
 
 After migration, validate the Phase 0 backfill with:
 
@@ -191,7 +192,13 @@ npm run smoke:fresh-db # Verify the required Phase 2 schema on an isolated datab
 | `/api/deals/summary` | GET | Pipeline, weighted, forecast, and closed totals by currency |
 | `/api/leads/convert` | POST | Idempotent lead-to-account/contact/deal conversion |
 | `/api/meetings` | GET, POST, PUT, DELETE | Meeting scheduling and relationship ownership checks |
-| `/api/activities` | GET, POST | Activity timeline records |
+| `/api/activities` | GET, POST, PUT, DELETE | First-class activities with My Day, overdue, upcoming, completed, owner and related-record filters |
+| `/api/notes` | GET, POST, PUT, DELETE | Attributed notes for leads, accounts, contacts and deals |
+| `/api/saved-views` | GET, POST, PUT, DELETE | Private and shared saved resource views |
+| `/api/search` | GET | Authorized global search across CRM records, activities, quotes and invoices |
+| `/api/assign` | POST | Workspace-checked bulk record assignment |
+| `/api/imports` | POST | CSV/XLSX row preview, dry run, validation and transactional import |
+| `/api/duplicates` | GET, POST | Duplicate review and transactional merge with linked-record preservation |
 | `/api/invoices` | GET, POST, PUT, DELETE | Invoice lifecycle, totals, balances, and payment status |
 | `/api/leads/bulk` | POST | Transactional bulk lead update/delete |
 | `/api/dashboard` | GET | Tenant-scoped dashboard aggregates and trends |

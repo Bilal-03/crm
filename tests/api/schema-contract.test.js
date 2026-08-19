@@ -5,6 +5,7 @@ import test from 'node:test';
 const schema = fs.readFileSync(new URL('../../schema.sql', import.meta.url), 'utf8');
 const migration = fs.readFileSync(new URL('../../migrations/005_phase0_data_correctness.sql', import.meta.url), 'utf8');
 const phase2Migration = fs.readFileSync(new URL('../../migrations/006_phase2_core_model.sql', import.meta.url), 'utf8');
+const phase4Migration = fs.readFileSync(new URL('../../migrations/007_phase4_productivity.sql', import.meta.url), 'utf8');
 
 test('fresh schema includes the structures previously missing from Team Settings and Phase 0 reporting', () => {
   assert.match(schema, /CREATE TABLE workspace_invitations/);
@@ -43,4 +44,22 @@ test('Phase 2 migration is backward-compatible, idempotent and verifies the back
   assert.match(phase2Migration, /ON CONFLICT \(workspace_id, source_lead_id\)/);
   assert.match(phase2Migration, /RAISE EXCEPTION 'Phase 2 backfill incomplete/);
   assert.match(phase2Migration, /006_phase2_core_model/);
+});
+
+test('Phase 4 migration creates first-class productivity records and preserves legacy data', () => {
+  assert.match(schema, /CREATE TABLE record_notes/);
+  assert.match(schema, /CREATE TABLE saved_views/);
+  assert.match(schema, /subject VARCHAR\(200\)/);
+  assert.match(schema, /due_at TIMESTAMPTZ/);
+  assert.match(schema, /num_nonnulls\(lead_id, account_id, contact_id, deal_id\) = 1/);
+  assert.match(phase4Migration, /ALTER TABLE activities/);
+  assert.match(phase4Migration, /legacy_source_id/);
+  assert.match(phase4Migration, /INSERT INTO record_notes/);
+  assert.match(phase4Migration, /INSERT INTO activities/);
+  assert.match(phase4Migration, /value->>'createdAt'/);
+  assert.match(phase4Migration, /AT TIME ZONE w\.timezone/);
+  assert.match(phase4Migration, /WITH ORDINALITY/);
+  assert.match(phase4Migration, /md5\(concat_ws/);
+  assert.match(phase4Migration, /ON CONFLICT \(version\) DO NOTHING/);
+  assert.match(phase4Migration, /007_phase4_productivity/);
 });

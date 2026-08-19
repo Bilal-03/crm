@@ -28,6 +28,7 @@ export default withApiRoute({
       const search = getQueryString(req.query, 'search', 160);
       const accountId = getQueryUuid(req.query, 'account_id');
       const owner = getQueryString(req.query, 'owner', 256);
+      const ownerUserId = owner === 'me' ? userId : owner;
       const orderBy = getSort(req.query, {
         created: 'c.created_at',
         updated: 'c.updated_at',
@@ -46,7 +47,7 @@ export default withApiRoute({
             OR c.email ILIKE ${search ? `%${search}%` : null}
             OR c.phone ILIKE ${search ? `%${search}%` : null})
           AND (${accountId}::uuid IS NULL OR c.account_id = ${accountId})
-          AND (${owner}::text IS NULL OR c.owner_user_id = ${owner})
+          AND (${ownerUserId}::text IS NULL OR c.owner_user_id = ${ownerUserId})
         ORDER BY ${sql.unsafe(orderBy)}
         LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}
       `;

@@ -27,6 +27,7 @@ export default withApiRoute({
       const pagination = getPagination(req.query);
       const search = getQueryString(req.query, 'search', 160);
       const owner = getQueryString(req.query, 'owner', 256);
+      const ownerUserId = owner === 'me' ? userId : owner;
       const orderBy = getSort(req.query, {
         created: 'a.created_at',
         updated: 'a.updated_at',
@@ -52,7 +53,7 @@ export default withApiRoute({
             OR a.domain ILIKE ${search ? `%${search}%` : null}
             OR a.phone ILIKE ${search ? `%${search}%` : null}
             OR a.website ILIKE ${search ? `%${search}%` : null})
-          AND (${owner}::text IS NULL OR a.owner_user_id = ${owner})
+          AND (${ownerUserId}::text IS NULL OR a.owner_user_id = ${ownerUserId})
         GROUP BY a.id
         ORDER BY ${sql.unsafe(orderBy)}
         LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}

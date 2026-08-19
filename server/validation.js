@@ -1,9 +1,14 @@
 import { HttpError } from './http.js';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export const LEAD_STAGES = ['new', 'qualified', 'follow-up', 'proposal', 'closed-won', 'closed-lost'];
 export const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'partial', 'cancelled'];
 export const DEAL_STATUSES = ['open', 'won', 'lost'];
 export const FORECAST_CATEGORIES = ['omitted', 'pipeline', 'best_case', 'commit', 'closed'];
+export const ACTIVITY_TYPES = ['task', 'call', 'meeting', 'email', 'note', 'follow_up', 'other'];
+export const ACTIVITY_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
+export const PRODUCTIVITY_RESOURCES = ['leads', 'contacts', 'accounts', 'deals', 'activities', 'invoices'];
 
 export function validateLead(body, { partial = false } = {}) {
   const input = object(body);
@@ -36,13 +41,97 @@ export function validateMeeting(body, { partial = false } = {}) {
   return result;
 }
 
-export function validateActivity(body) {
+export function validateActivity(body, { partial = false } = {}) {
   const input = object(body);
-  return {
-    lead_id: uuid(input, 'lead_id', { nullable: true }) ?? null,
-    type: string(input, 'type', { required: true, min: 1, max: 80, trim: true }),
-    message: string(input, 'message', { required: true, min: 1, max: 2_000, trim: true }),
-  };
+  const result = {};
+
+  assign(result, 'lead_id', uuid(input, 'lead_id', { nullable: true }));
+  assign(result, 'account_id', uuid(input, 'account_id', { nullable: true }));
+  assign(result, 'contact_id', uuid(input, 'contact_id', { nullable: true }));
+  assign(result, 'deal_id', uuid(input, 'deal_id', { nullable: true }));
+  assign(result, 'type', string(input, 'type', { min: 1, max: 80, trim: true, required: !partial }));
+  assign(result, 'subject', nullableString(input, 'subject', 200));
+  assign(result, 'description', nullableString(input, 'description', 10_000));
+  assign(result, 'message', nullableString(input, 'message', 2_000));
+  assign(result, 'due_at', nullableDateTime(input, 'due_at'));
+  assign(result, 'completed_at', nullableDateTime(input, 'completed_at'));
+  assign(result, 'completed', boolean(input, 'completed'));
+  assign(result, 'priority', enumeration(input, 'priority', ACTIVITY_PRIORITIES, { defaultValue: partial ? undefined : 'normal' }));
+  assign(result, 'owner_user_id', nullableString(input, 'owner_user_id', 256));
+  assign(result, 'outcome', nullableString(input, 'outcome', 500));
+
+  if (!partial && !result.subject && !result.message) invalid('subject', 'or message is required');
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validateRecordNote(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+  assign(result, 'lead_id', uuid(input, 'lead_id', { nullable: true }));
+  assign(result, 'account_id', uuid(input, 'account_id', { nullable: true }));
+  assign(result, 'contact_id', uuid(input, 'contact_id', { nullable: true }));
+  assign(result, 'deal_id', uuid(input, 'deal_id', { nullable: true }));
+  assign(result, 'body', string(input, 'body', { min: 1, max: 20_000, trim: true, required: !partial }));
+  if (!partial) {
+    const targets = ['lead_id', 'account_id', 'contact_id', 'deal_id'].filter(key => result[key]);
+    if (targets.length !== 1) invalid('target', 'exactly one record target is required');
+  }
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validateSavedView(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+  assign(result, 'resource', enumeration(input, 'resource', PRODUCTIVITY_RESOURCES, { defaultValue: partial ? undefined : 'activities' }));
+  assign(result, 'name', string(input, 'name', { min: 1, max: 120, trim: true, required: !partial }));
+  assign(result, 'filters', jsonObject(input, 'filters', { defaultValue: partial ? undefined : {} }));
+  assign(result, 'columns', jsonArray(input, 'columns', { defaultValue: partial ? undefined : [], max: 50 }));
+  assign(result, 'sort', jsonObject(input, 'sort', { defaultValue: partial ? undefined : {} }));
+  assign(result, 'is_shared', boolean(input, 'is_shared', partial ? undefined : false));
+  assign(result, 'is_pinned', boolean(input, 'is_pinned', partial ? undefined : false));
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validateBulkAssignment(body) {
+  const input = object(body);
+  const resource = enumeration(input, 'resource', PRODUCTIVITY_RESOURCES, { defaultValue: 'leads' });
+  if (!Array.isArray(input.ids) || input.ids.length < 1 || input.ids.length > 100) {
+    invalid('ids', 'must contain between 1 and 100 record IDs');
+  }
+  const ids = [...new Set(input.ids)];
+  if (ids.length !== input.ids.length) invalid('ids', 'must not contain duplicate IDs');
+  ids.forEach((id, index) => {
+    if (typeof id !== 'string' || !UUID_PATTERN.test(id)) invalid(`ids[${index}]`, 'must be a valid UUID');
+  });
+  const ownerUserId = string(input, 'owner_user_id', { required: true, min: 1, max: 256, trim: true });
+  return { resource, ids, owner_user_id: ownerUserId };
+}
+
+export function validateImportRequest(body) {
+  const input = object(body);
+  const resource = enumeration(input, 'resource', ['leads', 'contacts', 'accounts', 'customers'], { defaultValue: 'leads' });
+  const mode = enumeration(input, 'mode', ['preview', 'dry_run', 'import'], { defaultValue: 'preview' });
+  if (!Array.isArray(input.rows) || input.rows.length < 1 || input.rows.length > 1_000) {
+    invalid('rows', 'must contain between 1 and 1,000 rows');
+  }
+  const mapping = input.mapping === undefined ? {} : jsonObject(input, 'mapping');
+  return { resource, mode, rows: input.rows, mapping };
+}
+
+export function validateMergeRequest(body) {
+  const input = object(body);
+  const resource = enumeration(input, 'resource', ['leads', 'contacts', 'accounts', 'customers'], { defaultValue: 'leads' });
+  const survivorId = uuid(input, 'survivor_id', { required: true });
+  if (!Array.isArray(input.duplicate_ids) || input.duplicate_ids.length < 1 || input.duplicate_ids.length > 50) {
+    invalid('duplicate_ids', 'must contain between 1 and 50 record IDs');
+  }
+  const duplicateIds = [...new Set(input.duplicate_ids)];
+  if (duplicateIds.some(id => typeof id !== 'string' || !UUID_PATTERN.test(id))) invalid('duplicate_ids', 'must contain valid UUIDs');
+  if (duplicateIds.includes(survivorId)) invalid('duplicate_ids', 'cannot include the survivor');
+  return { resource, survivor_id: survivorId, duplicate_ids: duplicateIds };
 }
 
 export function validateCustomer(body) {
@@ -300,6 +389,12 @@ function dateTime(input, field, { required = false } = {}) {
   return new Date(value).toISOString();
 }
 
+function nullableDateTime(input, field) {
+  if (!(field in input) || input[field] === undefined) return undefined;
+  if (input[field] === null || input[field] === '') return null;
+  return dateTime(input, field, { required: true });
+}
+
 function number(input, field, { min, max, defaultValue } = {}) {
   if (!(field in input) || input[field] === undefined) return defaultValue;
   const value = Number(input[field]);
@@ -408,6 +503,19 @@ function boundedArray(value, field, max) {
   if (!Array.isArray(value)) invalid(field, 'must be an array');
   if (value.length > max) invalid(field, `must contain at most ${max} items`);
   return value;
+}
+
+function jsonObject(input, field, { defaultValue } = {}) {
+  if (!(field in input) || input[field] === undefined) return defaultValue;
+  if (!input[field] || typeof input[field] !== 'object' || Array.isArray(input[field])) {
+    invalid(field, 'must be a JSON object');
+  }
+  return input[field];
+}
+
+function jsonArray(input, field, { defaultValue, max = 100 } = {}) {
+  if (!(field in input) || input[field] === undefined) return defaultValue;
+  return boundedArray(input[field], field, max);
 }
 
 function assign(target, key, value) {

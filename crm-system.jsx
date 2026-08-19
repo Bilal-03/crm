@@ -13,7 +13,7 @@ import {
   Mail, Phone, Building2, Clock, AlertCircle, CheckCircle2,
   LayoutGrid, List, Menu, User, Bell, TrendingUp, Activity,
   Flame, Sun, Snowflake, FileDown, DollarSign, Send, Eye, Printer, BarChart3,
-  Settings, UserPlus, UserMinus, Shield
+  Settings, UserPlus, UserMinus, Shield, ListTodo
 } from 'lucide-react';
 
 // Add global styles for Light Theme
@@ -68,6 +68,7 @@ import { AppShell } from './src/components/layout/AppShell.jsx';
 import { ConfirmDialog } from './src/components/ui/ConfirmDialog.jsx';
 import { EmptyState } from './src/components/ui/EmptyState.jsx';
 import SalesWorkspace from './src/features/sales/SalesWorkspace.jsx';
+import ProductivityWorkspace from './src/features/productivity/ProductivityWorkspace.jsx';
 
 let pdfLibrariesPromise;
 const loadPdfLibraries = () => {
@@ -426,6 +427,8 @@ export default function CRMApp() {
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [pipelineView, setPipelineView] = useState('kanban'); 
   const [searchTerm, setSearchTerm] = useState('');
+  const [globalSearchResults, setGlobalSearchResults] = useState([]);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
   const [filterStage, setFilterStage] = useState('all');
   const [dataLoadErrors, setDataLoadErrors] = useState([]);
   const [toast, setToast] = useState(null);
@@ -437,6 +440,23 @@ export default function CRMApp() {
   const notify = (message, type = 'success') => {
     setToast({ message, type });
   };
+
+  const runGlobalSearch = useCallback(async query => {
+    if (!query || query.trim().length < 2) {
+      setGlobalSearchResults([]);
+      return;
+    }
+    setGlobalSearchLoading(true);
+    try {
+      const results = await fetchApi(`/search?q=${encodeURIComponent(query.trim())}&limit=10`);
+      setGlobalSearchResults(Array.isArray(results) ? results : []);
+    } catch (error) {
+      console.error('Global search failed:', error);
+      setGlobalSearchResults([]);
+    } finally {
+      setGlobalSearchLoading(false);
+    }
+  }, [fetchApi]);
 
   const requestConfirm = useCallback((options) => new Promise(resolve => {
     confirmResolverRef.current?.(false);
@@ -891,24 +911,26 @@ export default function CRMApp() {
     const lead = leads.find(l => l.id === leadId);
     if (!lead) return;
 
-    const newNote = {
-      id: crypto.randomUUID(),
-      text: noteText,
-      timestamp: new Date().toISOString()
-    };
-
-    const updatedNotes = [newNote, ...(lead.notes || [])];
-    
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, notes: updatedNotes } : l));
-    
-    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: { notes: updatedNotes } }); } catch (e) { error = e; }
-    if (error) {
-      setLeads(prev => prev.map(item => item.id === leadId ? lead : item));
-      console.error('Error adding note:', error);
-    }
-    else {
+    try {
+      const savedNote = await fetchApi('/notes', {
+        method: 'POST',
+        body: { lead_id: leadId, body: noteText },
+      });
+      const newNote = {
+        id: savedNote.id,
+        text: savedNote.body,
+        timestamp: savedNote.created_at,
+      };
+      setLeads(prev => prev.map(item => item.id === leadId
+        ? { ...item, notes: [newNote, ...(item.notes || [])] }
+        : item));
+      setSelectedLead(prev => prev?.id === leadId
+        ? { ...prev, notes: [newNote, ...(prev.notes || [])] }
+        : prev);
       invalidateDashboard();
-      addActivity('note_added', `Note added to lead`, leadId);
+    } catch (error) {
+      console.error('Error adding note:', error);
+      notify(error.message || 'The note could not be saved.', 'error');
     }
   };
 
@@ -916,47 +938,74 @@ export default function CRMApp() {
     const lead = leads.find(l => l.id === leadId);
     if (!lead) return;
 
-    const newReminder = {
-      id: crypto.randomUUID(),
-      ...reminderData,
-      createdAt: new Date().toISOString(),
-      completed: false
-    };
-
-    const updatedReminders = [...(lead.reminders || []), newReminder];
-
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, reminders: updatedReminders } : l));
-    
-    let error = null; try { await fetchApi(`/leads?id=${ leadId }`, { method: 'PUT', body: { reminders: updatedReminders } }); } catch (e) { error = e; }
-    if (error) {
-      setLeads(prev => prev.map(item => item.id === leadId ? lead : item));
-      console.error('Error adding reminder:', error);
-    }
-    else {
+    try {
+      const savedActivity = await fetchApi('/activities', {
+        method: 'POST',
+        body: {
+          type: 'task',
+          subject: reminderData.note,
+          description: reminderData.note,
+          lead_id: leadId,
+          due_at: new Date(`${reminderData.date}T09:00:00`).toISOString(),
+        },
+      });
+      const newReminder = {
+        id: savedActivity.id,
+        date: reminderData.date,
+        note: savedActivity.subject,
+        createdAt: savedActivity.created_at,
+        completed: Boolean(savedActivity.completed_at),
+      };
+      setLeads(prev => prev.map(item => item.id === leadId
+        ? { ...item, reminders: [...(item.reminders || []), newReminder] }
+        : item));
+      setActivities(previous => [savedActivity, ...previous]);
+      setSelectedLead(prev => prev?.id === leadId
+        ? { ...prev, reminders: [...(prev.reminders || []), newReminder] }
+        : prev);
       invalidateDashboard();
-      addActivity('reminder_set', `Follow-up reminder set`, leadId);
+    } catch (error) {
+      console.error('Error adding reminder:', error);
+      notify(error.message || 'The reminder could not be saved.', 'error');
     }
   };
 
   const completeReminder = async (leadId, reminderId) => {
     const lead = leads.find(item => item.id === leadId);
     if (!lead) return;
-
-    const updatedReminders = (lead.reminders || []).map(reminder => (
-      reminder.id === reminderId ? { ...reminder, completed: true, completedAt: new Date().toISOString() } : reminder
+    let activity = activities.find(item => (
+      (item.id === reminderId || item.legacy_source_id === reminderId) && item.lead_id === leadId
     ));
-
-    setLeads(prev => prev.map(item => item.id === leadId ? { ...item, reminders: updatedReminders } : item));
-    setSelectedLead(prev => prev?.id === leadId ? { ...prev, reminders: updatedReminders } : prev);
+    if (!activity) {
+      try {
+        const relatedActivities = await fetchApi(`/activities?lead_id=${leadId}&bucket=all&pageSize=100`);
+        activity = relatedActivities.find(item => item.id === reminderId || item.legacy_source_id === reminderId);
+      } catch (error) {
+        console.error('Error loading reminder activity:', error);
+      }
+    }
+    if (!activity) {
+      notify('This reminder is not available as an activity. Refresh the page and try again.', 'error');
+      return;
+    }
 
     try {
-      await fetchApi(`/leads?id=${leadId}`, { method: 'PUT', body: { reminders: updatedReminders } });
+      await fetchApi(`/activities?id=${activity.id}`, {
+        method: 'PUT',
+        body: { completed: true },
+      });
+      const completedAt = new Date().toISOString();
+      const updatedReminders = (lead.reminders || []).map(reminder => (
+        reminder.id === reminderId ? { ...reminder, completed: true, completedAt } : reminder
+      ));
+      setActivities(previous => previous.map(item => item.id === activity.id
+        ? { ...item, completed: true, completed_at: completedAt }
+        : item));
+      setLeads(prev => prev.map(item => item.id === leadId ? { ...item, reminders: updatedReminders } : item));
+      setSelectedLead(prev => prev?.id === leadId ? { ...prev, reminders: updatedReminders } : prev);
       invalidateDashboard();
-      addActivity('reminder_completed', `Follow-up completed for ${lead.name}`, leadId);
       notify('Follow-up marked complete.');
     } catch (error) {
-      setLeads(prev => prev.map(item => item.id === leadId ? lead : item));
-      setSelectedLead(prev => prev?.id === leadId ? lead : prev);
       notify(error.message || 'Failed to complete follow-up.', 'error');
     }
   };
@@ -1241,6 +1290,13 @@ export default function CRMApp() {
           workspaces={teamData?.workspaces || []}
           activeWorkspaceId={activeWorkspaceId || teamData?.workspace?.id}
           onSelectWorkspace={setActiveWorkspaceId}
+          onGlobalSearch={runGlobalSearch}
+          globalSearchResults={globalSearchResults}
+          globalSearchLoading={globalSearchLoading}
+          onGlobalResultClick={(result) => {
+            setGlobalSearchResults([]);
+            navigate(result.route || '/dashboard');
+          }}
         />
       )}
       mobileNav={(
@@ -1297,6 +1353,17 @@ export default function CRMApp() {
                 onUpdateAccount={updateAccount}
                 onCreateContact={createContact}
                 onUpdateContact={updateContact}
+                onNotify={notify}
+              />
+            )}
+
+            {currentPage === 'activities' && (
+              <ProductivityWorkspace
+                request={fetchApi}
+                leads={leads}
+                accounts={accounts}
+                contacts={contacts}
+                deals={deals}
                 onNotify={notify}
               />
             )}
@@ -1455,6 +1522,7 @@ export default function CRMApp() {
 function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces, activeWorkspaceId, onSelectWorkspace }) {
   const sections = [
     { label: 'Workspace', items: [{ id: 'dashboard', icon: Home, label: 'Dashboard' }] },
+    { label: 'Productivity', items: [{ id: 'activities', icon: ListTodo, label: 'My Day' }] },
     { label: 'Sales', items: [
       { id: 'leads', icon: Users, label: 'Leads' },
       { id: 'contacts', icon: User, label: 'Contacts' },
@@ -1558,7 +1626,14 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
 }
 
 // Header Component  
-function Header({ user, onToggleSidebar, overdueCount, workspaceName, workspaces, activeWorkspaceId, onSelectWorkspace }) {
+function Header({ user, onToggleSidebar, overdueCount, workspaceName, workspaces, activeWorkspaceId, onSelectWorkspace, onGlobalSearch, globalSearchResults = [], globalSearchLoading = false, onGlobalResultClick }) {
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => onGlobalSearch?.(query), 250);
+    return () => clearTimeout(timer);
+  }, [query, onGlobalSearch]);
+
   return (
     <header className="bg-white/50 backdrop-blur-xl border-b border-gray-200 px-4 py-3 md:px-8 md:py-4">
       <div className="flex items-center justify-between">
@@ -1572,12 +1647,23 @@ function Header({ user, onToggleSidebar, overdueCount, workspaceName, workspaces
           <Menu className="w-6 h-6 text-gray-700" />
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
           {workspaces.length > 0 && (
             <select aria-label="Active workspace" value={activeWorkspaceId || ''} onChange={(event) => onSelectWorkspace(event.target.value)} className="hidden max-w-44 rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm font-semibold text-gray-700 md:block">
               {workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
             </select>
           )}
+          <div className="relative hidden min-w-0 flex-1 max-w-xl md:block">
+            <label className="sr-only" htmlFor="global-crm-search">Search CRM</label>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+            <input id="global-crm-search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search leads, contacts, deals, invoices…" className="min-h-10 w-full rounded-xl border border-gray-200 bg-white/80 pl-9 pr-10 text-sm text-gray-800 outline-none ring-indigo-500 focus:ring-2" />
+            {globalSearchLoading && <span className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-600" aria-label="Searching" />}
+            {!globalSearchLoading && query.trim().length >= 2 && globalSearchResults.length > 0 && (
+              <div className="absolute left-0 right-0 top-12 z-50 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+                {globalSearchResults.map(result => <button key={`${result.type}-${result.id}`} type="button" onClick={() => { setQuery(''); onGlobalResultClick?.(result); }} className="block w-full border-b border-gray-100 px-4 py-3 text-left last:border-0 hover:bg-gray-50"><span className="block truncate text-sm font-semibold text-gray-900">{result.title}</span><span className="mt-1 block truncate text-xs text-gray-500">{result.type} · {result.subtitle || 'No additional details'}</span></button>)}
+              </div>
+            )}
+          </div>
           {overdueCount > 0 && (
             <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
               <AlertCircle className="w-4 h-4 text-red-500" />
@@ -1608,6 +1694,7 @@ function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
   const items = [
     { id: 'dashboard', label: 'Home', icon: Home },
     { id: 'leads', label: 'Leads', icon: Users },
+    { id: 'activities', label: 'My Day', icon: ListTodo },
     { id: 'deals', label: 'Deals', icon: Target },
     { id: 'pipeline', label: 'Pipeline', icon: Activity },
   ];

@@ -40,6 +40,7 @@ export default withApiRoute({
       const pipelineId = getQueryUuid(req.query, 'pipeline_id');
       const stageId = getQueryUuid(req.query, 'stage_id');
       const owner = getQueryString(req.query, 'owner', 256);
+      const ownerUserId = owner === 'me' ? userId : owner;
       const status = getQueryEnum(req.query, 'status', ['open', 'won', 'lost']);
       const forecastCategory = getQueryEnum(req.query, 'forecast_category', ['omitted', 'pipeline', 'best_case', 'commit', 'closed']);
       const from = getQueryDate(req.query, 'from');
@@ -77,7 +78,7 @@ export default withApiRoute({
             OR d.lead_source ILIKE ${search ? `%${search}%` : null})
           AND (${pipelineId}::uuid IS NULL OR d.pipeline_id = ${pipelineId})
           AND (${stageId}::uuid IS NULL OR d.stage_id = ${stageId})
-          AND (${owner}::text IS NULL OR d.owner_user_id = ${owner})
+          AND (${ownerUserId}::text IS NULL OR d.owner_user_id = ${ownerUserId})
           AND (${status}::text IS NULL OR d.status = ${status})
           AND (${forecastCategory}::text IS NULL OR d.forecast_category = ${forecastCategory})
           AND (${from}::date IS NULL OR d.expected_close_date >= ${from}::date)

@@ -1,6 +1,6 @@
 -- CRM Pro production schema for a fresh PostgreSQL/Neon database.
 -- Existing installations should apply migrations/002_production_hardening.sql through
--- migrations/006_phase2_core_model.sql in order instead.
+-- migrations/007_phase4_productivity.sql in order instead.
 
 BEGIN;
 
@@ -82,10 +82,26 @@ CREATE TABLE activities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
-  lead_id UUID REFERENCES leads(id) ON DELETE SET NULL,
+  lead_id UUID,
+  account_id UUID,
+  contact_id UUID,
+  deal_id UUID,
   type VARCHAR(80) NOT NULL CHECK (length(trim(type)) > 0),
+  subject VARCHAR(200) NOT NULL CHECK (length(trim(subject)) > 0),
+  description TEXT,
   message VARCHAR(2000) NOT NULL CHECK (length(trim(message)) > 0),
-  timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  due_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  priority VARCHAR(16) NOT NULL DEFAULT 'normal'
+    CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  owner_user_id TEXT NOT NULL,
+  outcome VARCHAR(500),
+  created_by TEXT NOT NULL,
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  legacy_source_id UUID,
+  legacy_source_type VARCHAR(32)
 );
 
 CREATE TABLE customers (
@@ -262,6 +278,57 @@ CREATE TABLE deal_stage_history (
     REFERENCES leads (id, workspace_id) ON DELETE SET NULL
 );
 
+ALTER TABLE activities
+  ADD CONSTRAINT activities_workspace_lead_fk FOREIGN KEY (lead_id, workspace_id)
+    REFERENCES leads (id, workspace_id) ON DELETE SET NULL,
+  ADD CONSTRAINT activities_workspace_account_fk FOREIGN KEY (account_id, workspace_id)
+    REFERENCES accounts (id, workspace_id) ON DELETE SET NULL,
+  ADD CONSTRAINT activities_workspace_contact_fk FOREIGN KEY (contact_id, workspace_id)
+    REFERENCES contacts (id, workspace_id) ON DELETE SET NULL,
+  ADD CONSTRAINT activities_workspace_deal_fk FOREIGN KEY (deal_id, workspace_id)
+    REFERENCES deals (id, workspace_id) ON DELETE SET NULL;
+
+CREATE TABLE record_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  lead_id UUID,
+  account_id UUID,
+  contact_id UUID,
+  deal_id UUID,
+  author_user_id TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  body TEXT NOT NULL CHECK (length(trim(body)) > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT record_notes_target_check CHECK (
+    num_nonnulls(lead_id, account_id, contact_id, deal_id) = 1
+  ),
+  CONSTRAINT record_notes_workspace_lead_fk FOREIGN KEY (lead_id, workspace_id)
+    REFERENCES leads (id, workspace_id) ON DELETE CASCADE,
+  CONSTRAINT record_notes_workspace_account_fk FOREIGN KEY (account_id, workspace_id)
+    REFERENCES accounts (id, workspace_id) ON DELETE CASCADE,
+  CONSTRAINT record_notes_workspace_contact_fk FOREIGN KEY (contact_id, workspace_id)
+    REFERENCES contacts (id, workspace_id) ON DELETE CASCADE,
+  CONSTRAINT record_notes_workspace_deal_fk FOREIGN KEY (deal_id, workspace_id)
+    REFERENCES deals (id, workspace_id) ON DELETE CASCADE
+);
+
+CREATE TABLE saved_views (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL,
+  resource VARCHAR(32) NOT NULL CHECK (resource IN ('leads', 'contacts', 'accounts', 'deals', 'activities', 'invoices')),
+  name VARCHAR(120) NOT NULL CHECK (length(trim(name)) > 0),
+  filters JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(filters) = 'object'),
+  columns JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(columns) = 'array'),
+  sort JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(sort) = 'object'),
+  is_shared BOOLEAN NOT NULL DEFAULT false,
+  is_pinned BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (workspace_id, owner_user_id, resource, name)
+);
+
 CREATE UNIQUE INDEX deal_stage_history_legacy_lead_unique_idx
   ON deal_stage_history (workspace_id, source_lead_id)
   WHERE source_lead_id IS NOT NULL;
@@ -300,6 +367,15 @@ CREATE INDEX leads_workspace_won_idx ON leads (workspace_id, won_at DESC, id DES
 CREATE INDEX leads_workspace_lost_idx ON leads (workspace_id, lost_at DESC, id DESC);
 CREATE INDEX meetings_workspace_date_idx ON meetings (workspace_id, date_time, id);
 CREATE INDEX activities_workspace_timestamp_idx ON activities (workspace_id, timestamp DESC, id DESC);
+CREATE INDEX activities_workspace_owner_due_idx ON activities (workspace_id, owner_user_id, due_at, id);
+CREATE INDEX activities_workspace_completed_idx ON activities (workspace_id, completed_at, due_at, id);
+CREATE INDEX activities_workspace_lead_idx ON activities (workspace_id, lead_id, due_at DESC, id DESC);
+CREATE INDEX activities_workspace_deal_idx ON activities (workspace_id, deal_id, due_at DESC, id DESC);
+CREATE INDEX record_notes_workspace_lead_idx ON record_notes (workspace_id, lead_id, created_at DESC, id DESC);
+CREATE INDEX record_notes_workspace_account_idx ON record_notes (workspace_id, account_id, created_at DESC, id DESC);
+CREATE INDEX record_notes_workspace_contact_idx ON record_notes (workspace_id, contact_id, created_at DESC, id DESC);
+CREATE INDEX record_notes_workspace_deal_idx ON record_notes (workspace_id, deal_id, created_at DESC, id DESC);
+CREATE INDEX saved_views_workspace_resource_idx ON saved_views (workspace_id, resource, is_shared, updated_at DESC, id DESC);
 CREATE INDEX customers_workspace_created_idx ON customers (workspace_id, created_at DESC, id DESC);
 CREATE INDEX invoices_workspace_created_idx ON invoices (workspace_id, created_at DESC, id DESC);
 CREATE INDEX invoices_workspace_status_due_idx ON invoices (workspace_id, status, due_date);
@@ -328,6 +404,7 @@ INSERT INTO schema_migrations (version) VALUES
   ('003_workspace_foundation'),
   ('004_team_settings'),
   ('005_phase0_data_correctness'),
-  ('006_phase2_core_model');
+  ('006_phase2_core_model'),
+  ('007_phase4_productivity');
 
 COMMIT;
