@@ -71,6 +71,7 @@ import SalesWorkspace from './src/features/sales/SalesWorkspace.jsx';
 import ProductivityWorkspace from './src/features/productivity/ProductivityWorkspace.jsx';
 import RevenueWorkspace from './src/features/revenue/RevenueWorkspace.jsx';
 import ReportingWorkspace from './src/features/reporting/ReportingWorkspace.jsx';
+import CommunicationsWorkspace from './src/features/communications/CommunicationsWorkspace.jsx';
 
 let pdfLibrariesPromise;
 const loadPdfLibraries = () => {
@@ -561,6 +562,7 @@ export default function CRMApp() {
         const mappedMeetings = meetingsRes.map(m => ({
           ...m,
           dateTime: m.date_time,
+          endTime: m.end_time,
           leadId: m.lead_id,
           createdAt: m.created_at
         }));
@@ -1001,6 +1003,7 @@ export default function CRMApp() {
       lead_id: meetingData.leadId,
       title: meetingData.title,
       date_time: meetingData.dateTime,
+      end_time: meetingData.endTime || null,
       notes: meetingData.notes
     };
 
@@ -1016,6 +1019,7 @@ export default function CRMApp() {
       const newMeeting = {
         ...data,
         dateTime: data.date_time,
+        endTime: data.end_time,
         leadId: data.lead_id,
         createdAt: data.created_at
       };
@@ -1032,6 +1036,10 @@ export default function CRMApp() {
       dbUpdates.date_time = updates.dateTime;
       delete dbUpdates.dateTime;
     }
+    if (Object.prototype.hasOwnProperty.call(updates, 'endTime')) {
+      dbUpdates.end_time = updates.endTime || null;
+      delete dbUpdates.endTime;
+    }
     
     let data; let error = null; try { data = await fetchApi(`/meetings?id=${ meetingId }`, { method: 'PUT', body: dbUpdates }); } catch (e) { error = e; }
     
@@ -1043,6 +1051,7 @@ export default function CRMApp() {
         meeting.id === meetingId ? {
           ...data,
           dateTime: data.date_time,
+          endTime: data.end_time,
           leadId: data.lead_id,
           createdAt: data.created_at,
         } : meeting
@@ -1054,15 +1063,42 @@ export default function CRMApp() {
   };
 
   const deleteMeeting = async (meetingId) => {
-    setMeetings(prev => prev.filter(m => m.id !== meetingId));
-    let error = null; try { await fetchApi(`/meetings?id=${ meetingId }`, { method: 'DELETE' }); } catch (e) { error = e; }
+    const meeting = meetings.find(item => item.id === meetingId);
+    let error = null;
+    try {
+      if (meeting?.external_event_id && meeting.sync_status !== 'deleted') {
+        await fetchApi('/calendar-events', { method: 'POST', body: { action: 'delete', meeting_id: meetingId } });
+      }
+      await fetchApi(`/meetings?id=${ meetingId }`, { method: 'DELETE' });
+    } catch (e) { error = e; }
     if (error) {
       console.error('Error deleting meeting:', error);
       notify(error.message || 'Failed to delete meeting.', 'error');
     } else {
+      setMeetings(prev => prev.filter(m => m.id !== meetingId));
       invalidateDashboard();
       addActivity('meeting_deleted', `Meeting deleted`);
       notify('Meeting deleted.');
+    }
+  };
+
+  const syncMeeting = async (meetingId) => {
+    try {
+      const data = await fetchApi('/calendar-events', {
+        method: 'POST',
+        body: { action: 'sync', meeting_id: meetingId, create_meeting_url: true },
+      });
+      setMeetings(previous => previous.map(meeting => meeting.id === meetingId ? {
+        ...data,
+        dateTime: data.date_time,
+        endTime: data.end_time,
+        leadId: data.lead_id,
+        createdAt: data.created_at,
+      } : meeting));
+      notify('Meeting synced to Google Calendar.');
+    } catch (error) {
+      notify(error.message || 'Google Calendar sync failed.', 'error');
+      await fetchData();
     }
   };
 
@@ -1269,6 +1305,7 @@ export default function CRMApp() {
       header={(
         <Header
           user={user}
+          request={fetchApi}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           overdueCount={stats.overdueReminders}
           workspaceName={teamData?.workspace?.name}
@@ -1350,6 +1387,18 @@ export default function CRMApp() {
                 contacts={contacts}
                 deals={deals}
                 onNotify={notify}
+                onSent={() => user ? fetchData(user.id) : Promise.resolve()}
+              />
+            )}
+
+            {currentPage === 'communications' && (
+              <CommunicationsWorkspace
+                request={fetchApi}
+                leads={leads}
+                accounts={accounts}
+                contacts={contacts}
+                deals={deals}
+                onNotify={notify}
               />
             )}
             
@@ -1366,6 +1415,7 @@ export default function CRMApp() {
                   setShowMeetingModal(true);
                 }}
                 onDeleteMeeting={deleteMeeting}
+                onSyncMeeting={syncMeeting}
                 onRequestConfirm={requestConfirm}
               />
             )}
@@ -1499,7 +1549,10 @@ export default function CRMApp() {
 function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces, activeWorkspaceId, onSelectWorkspace }) {
   const sections = [
     { label: 'Workspace', items: [{ id: 'dashboard', icon: Home, label: 'Dashboard' }] },
-    { label: 'Productivity', items: [{ id: 'activities', icon: ListTodo, label: 'My Day' }] },
+    { label: 'Productivity', items: [
+      { id: 'activities', icon: ListTodo, label: 'My Day' },
+      { id: 'communications', icon: Mail, label: 'Communications' },
+    ] },
     { label: 'Sales', items: [
       { id: 'leads', icon: Users, label: 'Leads' },
       { id: 'contacts', icon: User, label: 'Contacts' },
@@ -1606,7 +1659,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
 }
 
 // Header Component  
-function Header({ user, onToggleSidebar, overdueCount, workspaceName, workspaces, activeWorkspaceId, onSelectWorkspace, onGlobalSearch, globalSearchResults = [], globalSearchLoading = false, onGlobalResultClick }) {
+function Header({ user, request, onToggleSidebar, overdueCount, workspaceName, workspaces, activeWorkspaceId, onSelectWorkspace, onGlobalSearch, globalSearchResults = [], globalSearchLoading = false, onGlobalResultClick }) {
   const [query, setQuery] = useState('');
 
   useEffect(() => {
@@ -1650,6 +1703,7 @@ function Header({ user, onToggleSidebar, overdueCount, workspaceName, workspaces
               <span className="text-sm text-red-600">{overdueCount} overdue reminders</span>
             </div>
           )}
+          <NotificationCenter request={request} workspaceId={activeWorkspaceId} />
           
           <div className="flex items-center gap-3">
             <div className="text-right">
@@ -1667,6 +1721,42 @@ function Header({ user, onToggleSidebar, overdueCount, workspaceName, workspaces
         </div>
       </div>
     </header>
+  );
+}
+
+function NotificationCenter({ request, workspaceId }) {
+  const [open, setOpen] = useState(false);
+  const [feed, setFeed] = useState({ items: [], unreadCount: 0 });
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setError('');
+      setFeed(await request('/notifications?pageSize=20&state=all'));
+    } catch (loadError) {
+      setError(loadError.message || 'Notifications could not be loaded.');
+    }
+  }, [request]);
+
+  useEffect(() => { void load(); }, [load, workspaceId]);
+
+  const update = async (action, id) => {
+    try {
+      await request('/notifications', { method: 'PUT', body: { action, ...(id ? { id } : {}) } });
+      await load();
+    } catch (updateError) {
+      setError(updateError.message || 'Notification could not be updated.');
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => { setOpen(value => !value); if (!open) void load(); }} aria-label="Notifications" className="relative rounded-xl p-2 text-gray-600 hover:bg-gray-100">
+        <Bell className="h-5 w-5" />
+        {feed.unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{Math.min(feed.unreadCount, 99)}</span>}
+      </button>
+      {open && <div className="absolute right-0 top-12 z-[90] w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"><div className="flex items-center justify-between border-b border-gray-100 px-4 py-3"><div><p className="font-bold text-gray-900">Notifications</p><p className="text-xs text-gray-500">{feed.unreadCount} unread</p></div>{feed.unreadCount > 0 && <button type="button" onClick={() => update('read_all')} className="text-xs font-semibold text-indigo-600">Mark all read</button>}</div>{error && <p className="m-3 rounded-lg bg-red-50 p-2 text-xs text-red-700">{error}</p>}<div className="max-h-96 divide-y divide-gray-100 overflow-y-auto">{feed.items?.length ? feed.items.map(item => <button key={item.id} type="button" onClick={() => item.status === 'unread' && update('read', item.id)} className={`block w-full px-4 py-3 text-left hover:bg-gray-50 ${item.status === 'unread' ? 'bg-indigo-50/50' : ''}`}><span className="block text-sm font-bold text-gray-900">{item.title}</span>{item.body && <span className="mt-1 block text-xs leading-5 text-gray-600">{item.body}</span>}<span className="mt-1 block text-[11px] text-gray-400">{new Date(item.created_at).toLocaleString()}</span></button>) : <p className="p-8 text-center text-sm text-gray-500">No notifications yet.</p>}</div></div>}
+    </div>
   );
 }
 
@@ -3333,7 +3423,7 @@ function TableView({ leads, onEditLead }) {
 }
 
 // Meetings Page Component (UPDATED with Edit/Delete buttons)
-function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMeeting, onRequestConfirm }) {
+function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMeeting, onSyncMeeting, onRequestConfirm }) {
   const upcomingMeetings = meetings.filter(m => new Date(m.dateTime) >= new Date());
   const pastMeetings = meetings.filter(m => new Date(m.dateTime) < new Date());
 
@@ -3379,16 +3469,16 @@ function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMe
                         <Clock className="w-4 h-4" />
                         {new Date(meeting.dateTime).toLocaleString()}
                       </div>
-                      {meeting.googleEventId && (
+                      {meeting.sync_status && meeting.sync_status !== 'local' && (
                         <span className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
                           <Calendar className="w-3 h-3" />
-                          Synced to Google
+                          {meeting.sync_status === 'synced' ? 'Synced to Google' : `Calendar ${meeting.sync_status}`}
                         </span>
                       )}
                     </div>
-                    {meeting.googleMeetLink && (
+                    {meeting.meeting_url && (
                       <a
-                        href={meeting.googleMeetLink}
+                        href={meeting.meeting_url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium"
@@ -3405,6 +3495,12 @@ function MeetingsPage({ meetings, leads, onAddMeeting, onEditMeeting, onDeleteMe
                   </div>
                   {/* Action Buttons */}
                   <div className="flex items-center gap-2">
+                    {meeting.sync_status !== 'synced' && <button
+                      type="button"
+                      onClick={() => onSyncMeeting(meeting.id)}
+                      className="px-3 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                      title="Sync to Google Calendar"
+                    >Sync</button>}
                     <button
                       onClick={() => onEditMeeting(meeting)}
                       className="p-2 hover:bg-[#6366F1]/10 rounded-lg transition-colors"
@@ -3926,6 +4022,7 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
     title: '',
     leadId: '',
     dateTime: '',
+    endTime: '',
     notes: ''
   });
 
@@ -3935,7 +4032,8 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
       setFormData({
         title: meeting.title || '',
         leadId: meeting.leadId || '',
-        dateTime: meeting.dateTime || '',
+        dateTime: toLocalDateTimeInput(meeting.dateTime),
+        endTime: toLocalDateTimeInput(meeting.endTime),
         notes: meeting.notes || ''
       });
     } else {
@@ -3943,6 +4041,7 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
         title: '',
         leadId: '',
         dateTime: '',
+        endTime: '',
         notes: ''
       });
     }
@@ -3950,7 +4049,11 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave(formData);
+    onSave({
+      ...formData,
+      dateTime: new Date(formData.dateTime).toISOString(),
+      endTime: formData.endTime ? new Date(formData.endTime).toISOString() : '',
+    });
   };
 
   return (
@@ -4034,6 +4137,18 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">End Time</label>
+            <input
+              type="datetime-local"
+              value={formData.endTime}
+              min={formData.dateTime || undefined}
+              onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#6366F1] focus:border-transparent outline-none text-gray-900"
+            />
+            <p className="mt-1 text-xs text-gray-500">If omitted, Google Calendar uses a one-hour duration.</p>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Notes
             </label>
@@ -4065,6 +4180,13 @@ function MeetingModal({ meeting, leads, onClose, onSave }) {
       </motion.div>
     </div>
   );
+}
+
+function toLocalDateTimeInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
 // ============================================

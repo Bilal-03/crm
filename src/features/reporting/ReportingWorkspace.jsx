@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Download, RefreshCw, Target, Timer, TrendingUp, WalletCards } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { ErrorState, LoadingState } from '../../components/ui/ResourceState.jsx';
+import GoalsPanel from './GoalsPanel.jsx';
 
 const RANGE_OPTIONS = [
   { value: '30', label: 'Last 30 days' },
@@ -110,6 +111,8 @@ export default function ReportingWorkspace({ request, pipelines = [], members = 
         <ReportMetric label="Outstanding" value={money(metrics.outstanding)} detail="Current invoice balance" />
         <ReportMetric label="Activities completed" value={metrics.activitiesCompleted || 0} detail={`${metrics.activitiesOverdue || 0} currently overdue`} />
       </section>
+
+      <GoalsPanel request={request} members={members} defaultCurrency={selectedCurrency} onNotify={onNotify} />
 
       <section className="grid gap-6 xl:grid-cols-2">
         <ChartCard title="Collected revenue" description={`Settled ${selectedCurrency} payments by payment date.`}>

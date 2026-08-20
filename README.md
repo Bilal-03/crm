@@ -14,7 +14,8 @@ CRM Pro is a full-stack React application designed for small teams that need one
 | Customers | Closed-won customer profiles and contact details |
 | Meetings | Upcoming and past meetings, Google Calendar links, and Google Meet links |
 | Revenue | Versioned quotes, protected invoice lifecycle, payments, credit notes, multi-currency PDFs, delivery history, and audit events |
-| Reporting | Currency-safe pipeline forecasts, deal outcomes, sales velocity, stage conversion/aging, owner/source performance, and filtered CSV exports |
+| Reporting | Currency-safe forecasts, goals/quotas, pacing, forecast-versus-target, deal outcomes, stage conversion/aging, owner/source performance, and filtered CSV exports |
+| Communications | Internal email compose, reusable templates, idempotent delivery/retry history, CRM timeline logging, and failure notifications |
 | Authentication | Clerk sign-in with tenant-scoped data access |
 | Notifications | In-app success and error feedback for important actions |
 
@@ -26,7 +27,7 @@ CRM Pro is a full-stack React application designed for small teams that need one
 - Clerk for authentication and session tokens
 - Vercel Functions for the API layer
 - Neon PostgreSQL for persistent data
-- Resend for optional invoice email delivery
+- Resend through a provider-neutral adapter for optional CRM and invoice email delivery
 - jsPDF and AutoTable for PDF quotes and invoices
 
 ## Architecture
@@ -117,9 +118,12 @@ psql "$NEON_DATABASE_URL" -f migrations/005_phase0_data_correctness.sql
 psql "$NEON_DATABASE_URL" -f migrations/006_phase2_core_model.sql
 psql "$NEON_DATABASE_URL" -f migrations/007_phase4_productivity.sql
 psql "$NEON_DATABASE_URL" -f migrations/008_phase5_quote_to_cash.sql
+psql "$NEON_DATABASE_URL" -f migrations/009_phase7_communications.sql
+psql "$NEON_DATABASE_URL" -f migrations/010_phase6_goals_quotas.sql
+psql "$NEON_DATABASE_URL" -f migrations/011_phase7_google_calendar.sql
 ```
 
-`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation, reporting, CRM core, productivity, and Phase 5 quote-to-cash structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
+`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation, reporting, CRM core, productivity, quote-to-cash, and Phase 7 communication structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
 
 After migration, validate the Phase 0 backfill with:
 
@@ -143,6 +147,35 @@ LEFT JOIN deal_stage_history h ON h.workspace_id = l.workspace_id AND h.source_l
 
 Phase 2 adds normalized fields and new core CRM tables without dropping legacy records. If validation fails, stop deployment and restore the pre-migration snapshot; do not manually delete the new columns or tables from a live database.
 
+After applying Phase 7, verify the migration and delivery constraints before enabling internal email:
+
+```sql
+SELECT version, applied_at FROM schema_migrations WHERE version = '009_phase7_communications';
+SELECT table_name FROM information_schema.tables
+WHERE table_name IN ('communication_integrations', 'email_templates', 'outbound_messages', 'notifications');
+SELECT conname FROM pg_constraint
+WHERE conname IN ('outbound_messages_target_check', 'meetings_workspace_integration_fk');
+```
+
+After migration 010, confirm the quota table and version are present:
+
+```sql
+SELECT version, applied_at FROM schema_migrations WHERE version = '010_phase6_goals_quotas';
+SELECT conname FROM pg_constraint WHERE conrelid = 'sales_goals'::regclass;
+```
+
+After migration 011, confirm the encrypted credential/state tables and meeting duration field are present:
+
+```sql
+SELECT version, applied_at FROM schema_migrations WHERE version = '011_phase7_google_calendar';
+SELECT table_name FROM information_schema.tables
+WHERE table_name IN ('integration_credentials', 'integration_oauth_states');
+SELECT column_name FROM information_schema.columns
+WHERE table_name = 'meetings' AND column_name = 'end_time';
+```
+
+The Phase 7 migrations are additive. If application rollback is required, deploy the previous application version and retain the new tables so message and sync history is not destroyed. OAuth tokens are encrypted at rest with `INTEGRATION_TOKEN_ENCRYPTION_KEY`; never rotate that key without first planning to reconnect every Google account.
+
 ### 4. Start the application
 
 ```bash
@@ -162,8 +195,15 @@ Open the local Vite URL shown in the terminal, normally `http://localhost:5173`.
 | `CLERK_JWT_KEY` | No | Optional PEM key for networkless verification |
 | `CLERK_AUTHORIZED_PARTIES` | Yes in production | Exact allowed frontend origin(s) |
 | `NEON_DATABASE_URL` | Yes | PostgreSQL connection string |
-| `RESEND_API_KEY` | Optional | Enables invoice email delivery |
+| `RESEND_API_KEY` | Optional | Enables Resend-backed CRM and invoice email delivery |
 | `INVOICE_FROM_EMAIL` | Optional | Verified sender for invoice emails |
+| `CRM_EMAIL_PROVIDER` | Optional | Provider-neutral CRM email adapter selection; currently `resend` |
+| `CRM_FROM_EMAIL` | Required for CRM email | Verified sender for internal CRM compose; falls back to `INVOICE_FROM_EMAIL` |
+| `APP_BASE_URL` | Required for Calendar | Exact public CRM origin used after the OAuth callback |
+| `GOOGLE_CLIENT_ID` | Required for Calendar | Google OAuth web application client ID |
+| `GOOGLE_CLIENT_SECRET` | Required for Calendar | Server-only Google OAuth client secret |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Required for Calendar | Exact callback registered in Google Cloud, ending in `/api/integrations/google-calendar/callback` |
+| `INTEGRATION_TOKEN_ENCRYPTION_KEY` | Required for Calendar | Base64-encoded 32-byte key used for authenticated token encryption |
 
 Use `.env.example` as the canonical variable list. Keep `.env`, `.env.local`, and production secret values out of Git.
 
@@ -213,6 +253,15 @@ npm run smoke:fresh-db # Verify the required Phase 2 schema on an isolated datab
 | `/api/dashboard` | GET | Tenant-scoped dashboard aggregates and trends |
 | `/api/reports` | GET | Tenant-scoped Deal, Stage History, Activity, Invoice and Payment aggregates with server-side date, currency, owner, pipeline and source filters |
 | `/api/reports/export` | GET | Bounded, filtered export rows for management-report CSV downloads |
+| `/api/goals` | GET, POST, PUT, DELETE | Manager-controlled team/owner quotas with event-based attainment, pacing and forecast-versus-target calculations |
+| `/api/messages` | GET, POST | Tenant-scoped outbound email history, idempotent sending, retries, failures, and timeline logging |
+| `/api/email-templates` | GET, POST, PUT, DELETE | Shared workspace email templates with archive-safe lifecycle |
+| `/api/communication-status` | GET | Non-secret provider configuration and connection health |
+| `/api/notifications` | GET, PUT | Current-user notification feed and read/dismiss actions |
+| `/api/integrations/google-calendar/connect` | POST | Starts state-bound Google OAuth authorization |
+| `/api/integrations/google-calendar/callback` | GET | Consumes the one-time OAuth callback and stores encrypted credentials |
+| `/api/integrations/google-calendar/disconnect` | POST | Revokes access and removes local credentials |
+| `/api/calendar-events` | POST | Idempotently syncs or deletes a CRM meeting in Google Calendar |
 | `/api/send-invoice-email` | POST | Generates and sends an invoice email through Resend |
 
 Collection responses use a consistent envelope:

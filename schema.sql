@@ -1,6 +1,6 @@
 -- CRM Pro production schema for a fresh PostgreSQL/Neon database.
 -- Existing installations should apply migrations/002_production_hardening.sql through
--- migrations/007_phase4_productivity.sql in order instead.
+-- migrations/011_phase7_google_calendar.sql in order instead.
 
 BEGIN;
 
@@ -84,11 +84,21 @@ CREATE TABLE meetings (
   lead_id UUID,
   title VARCHAR(200) NOT NULL CHECK (length(trim(title)) > 0),
   date_time TIMESTAMPTZ NOT NULL,
+  end_time TIMESTAMPTZ,
   notes TEXT,
+  integration_id UUID,
+  provider VARCHAR(40),
+  external_event_id VARCHAR(512),
+  meeting_url VARCHAR(1000),
+  sync_status VARCHAR(24) NOT NULL DEFAULT 'local'
+    CHECK (sync_status IN ('local', 'pending', 'synced', 'failed', 'deleted')),
+  sync_error VARCHAR(1000),
+  last_synced_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT meetings_workspace_lead_fk FOREIGN KEY (lead_id, workspace_id)
-    REFERENCES leads (id, workspace_id) ON DELETE CASCADE
+    REFERENCES leads (id, workspace_id) ON DELETE CASCADE,
+  CONSTRAINT meetings_end_after_start_check CHECK (end_time IS NULL OR end_time > date_time)
 );
 
 CREATE TABLE activities (
@@ -563,6 +573,171 @@ CREATE TRIGGER financial_audit_events_immutable
 BEFORE UPDATE OR DELETE ON financial_audit_events
 FOR EACH ROW EXECUTE FUNCTION prevent_financial_audit_mutation();
 
+CREATE TABLE communication_integrations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  kind VARCHAR(16) NOT NULL CHECK (kind IN ('email', 'calendar')),
+  owner_user_id TEXT NOT NULL,
+  provider VARCHAR(40) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'disconnected'
+    CHECK (status IN ('disconnected', 'connected', 'error', 'revoked')),
+  external_account_id VARCHAR(320),
+  calendar_id VARCHAR(512) DEFAULT 'primary',
+  display_name VARCHAR(200),
+  scopes JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(scopes) = 'array'),
+  token_reference VARCHAR(500),
+  token_expires_at TIMESTAMPTZ,
+  sync_cursor TEXT,
+  last_synced_at TIMESTAMPTZ,
+  last_error VARCHAR(1000),
+  revoked_at TIMESTAMPTZ,
+  created_by TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (id, workspace_id),
+  CONSTRAINT communication_integrations_workspace_owner_fk FOREIGN KEY (workspace_id, owner_user_id)
+    REFERENCES workspace_members(workspace_id, user_id) ON DELETE RESTRICT
+);
+
+CREATE TABLE integration_credentials (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  integration_id UUID NOT NULL,
+  access_token_encrypted TEXT NOT NULL,
+  refresh_token_encrypted TEXT,
+  token_type VARCHAR(32) NOT NULL DEFAULT 'Bearer',
+  expires_at TIMESTAMPTZ,
+  scopes JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(scopes) = 'array'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT integration_credentials_workspace_integration_fk FOREIGN KEY (integration_id, workspace_id)
+    REFERENCES communication_integrations(id, workspace_id) ON DELETE CASCADE,
+  UNIQUE (integration_id, workspace_id)
+);
+
+CREATE TABLE integration_oauth_states (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  provider VARCHAR(40) NOT NULL,
+  state_hash CHAR(64) NOT NULL UNIQUE,
+  return_path VARCHAR(500) NOT NULL DEFAULT '/communications',
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT integration_oauth_states_workspace_user_fk FOREIGN KEY (workspace_id, user_id)
+    REFERENCES workspace_members(workspace_id, user_id) ON DELETE CASCADE
+);
+
+CREATE TABLE email_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name VARCHAR(120) NOT NULL CHECK (length(trim(name)) > 0),
+  subject VARCHAR(200) NOT NULL CHECK (length(trim(subject)) > 0),
+  body_text TEXT NOT NULL CHECK (length(trim(body_text)) > 0),
+  body_html TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_by TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (id, workspace_id)
+);
+
+CREATE TABLE outbound_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  channel VARCHAR(16) NOT NULL DEFAULT 'email' CHECK (channel = 'email'),
+  provider VARCHAR(40) NOT NULL,
+  provider_message_id VARCHAR(256),
+  idempotency_key VARCHAR(128) NOT NULL,
+  provider_idempotency_key VARCHAR(220) NOT NULL,
+  retry_of_id UUID,
+  template_id UUID,
+  lead_id UUID,
+  account_id UUID,
+  contact_id UUID,
+  deal_id UUID,
+  from_address VARCHAR(320) NOT NULL,
+  recipient VARCHAR(320) NOT NULL,
+  subject VARCHAR(200) NOT NULL CHECK (length(trim(subject)) > 0),
+  body_text TEXT NOT NULL CHECK (length(trim(body_text)) > 0),
+  body_html TEXT,
+  status VARCHAR(24) NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'sent', 'delivered', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 1 CHECK (attempt_count > 0),
+  failure_reason VARCHAR(1000),
+  attempted_by TEXT NOT NULL,
+  request_id VARCHAR(128),
+  sent_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  failed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (id, workspace_id),
+  UNIQUE (workspace_id, idempotency_key),
+  CONSTRAINT outbound_messages_target_check CHECK (
+    num_nonnulls(lead_id, account_id, contact_id, deal_id) = 1
+  ),
+  CONSTRAINT outbound_messages_workspace_template_fk FOREIGN KEY (template_id, workspace_id)
+    REFERENCES email_templates(id, workspace_id) ON DELETE RESTRICT,
+  CONSTRAINT outbound_messages_workspace_retry_fk FOREIGN KEY (retry_of_id, workspace_id)
+    REFERENCES outbound_messages(id, workspace_id) ON DELETE RESTRICT,
+  CONSTRAINT outbound_messages_workspace_lead_fk FOREIGN KEY (lead_id, workspace_id)
+    REFERENCES leads(id, workspace_id) ON DELETE RESTRICT,
+  CONSTRAINT outbound_messages_workspace_account_fk FOREIGN KEY (account_id, workspace_id)
+    REFERENCES accounts(id, workspace_id) ON DELETE RESTRICT,
+  CONSTRAINT outbound_messages_workspace_contact_fk FOREIGN KEY (contact_id, workspace_id)
+    REFERENCES contacts(id, workspace_id) ON DELETE RESTRICT,
+  CONSTRAINT outbound_messages_workspace_deal_fk FOREIGN KEY (deal_id, workspace_id)
+    REFERENCES deals(id, workspace_id) ON DELETE RESTRICT
+);
+
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  recipient_user_id TEXT NOT NULL,
+  type VARCHAR(40) NOT NULL,
+  title VARCHAR(200) NOT NULL CHECK (length(trim(title)) > 0),
+  body VARCHAR(1000),
+  entity_type VARCHAR(40),
+  entity_id UUID,
+  status VARCHAR(16) NOT NULL DEFAULT 'unread'
+    CHECK (status IN ('unread', 'read', 'dismissed')),
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE sales_goals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name VARCHAR(160) NOT NULL CHECK (length(trim(name)) > 0),
+  scope VARCHAR(16) NOT NULL CHECK (scope IN ('team', 'owner')),
+  owner_user_id TEXT,
+  metric VARCHAR(32) NOT NULL CHECK (metric IN ('won_revenue', 'collected_revenue', 'deals_won')),
+  currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  target_value NUMERIC(14, 2) NOT NULL CHECK (target_value > 0),
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+  created_by TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT sales_goals_period_check CHECK (period_end >= period_start),
+  CONSTRAINT sales_goals_scope_owner_check CHECK (
+    (scope = 'team' AND owner_user_id IS NULL)
+    OR (scope = 'owner' AND owner_user_id IS NOT NULL)
+  ),
+  CONSTRAINT sales_goals_workspace_owner_fk FOREIGN KEY (workspace_id, owner_user_id)
+    REFERENCES workspace_members(workspace_id, user_id) ON DELETE RESTRICT
+);
+
+ALTER TABLE meetings ADD CONSTRAINT meetings_workspace_integration_fk
+  FOREIGN KEY (integration_id, workspace_id)
+  REFERENCES communication_integrations(id, workspace_id) ON DELETE RESTRICT;
+
 CREATE INDEX leads_workspace_created_idx ON leads (workspace_id, created_at DESC, id DESC);
 CREATE INDEX leads_workspace_stage_idx ON leads (workspace_id, stage, created_at DESC);
 CREATE INDEX leads_workspace_won_idx ON leads (workspace_id, won_at DESC, id DESC);
@@ -592,6 +767,25 @@ CREATE INDEX credit_notes_workspace_invoice_idx ON credit_notes (workspace_id, i
 CREATE INDEX invoice_deliveries_workspace_invoice_idx ON invoice_deliveries (workspace_id, invoice_id, created_at DESC);
 CREATE INDEX invoice_deliveries_workspace_quote_idx ON invoice_deliveries (workspace_id, quote_id, created_at DESC);
 CREATE INDEX financial_audit_workspace_entity_idx ON financial_audit_events (workspace_id, entity_type, entity_id, created_at DESC);
+CREATE UNIQUE INDEX communication_integrations_workspace_account_unique_idx
+  ON communication_integrations (workspace_id, kind, provider, external_account_id)
+  WHERE external_account_id IS NOT NULL;
+CREATE UNIQUE INDEX communication_integrations_workspace_owner_provider_unique_idx
+  ON communication_integrations (workspace_id, owner_user_id, kind, provider);
+CREATE INDEX integration_oauth_states_expiry_idx ON integration_oauth_states (provider, expires_at, consumed_at);
+CREATE INDEX integration_credentials_workspace_idx ON integration_credentials (workspace_id, integration_id);
+CREATE UNIQUE INDEX email_templates_workspace_name_unique_idx ON email_templates (workspace_id, lower(name));
+CREATE INDEX outbound_messages_workspace_created_idx ON outbound_messages (workspace_id, created_at DESC, id DESC);
+CREATE INDEX outbound_messages_workspace_target_idx ON outbound_messages (workspace_id, deal_id, contact_id, lead_id, created_at DESC);
+CREATE INDEX outbound_messages_workspace_status_idx ON outbound_messages (workspace_id, status, updated_at DESC, id DESC);
+CREATE INDEX notifications_recipient_status_idx ON notifications (workspace_id, recipient_user_id, status, created_at DESC, id DESC);
+CREATE UNIQUE INDEX sales_goals_active_quota_unique_idx
+  ON sales_goals (workspace_id, metric, currency, period_start, period_end, COALESCE(owner_user_id, '__team__'))
+  WHERE status = 'active';
+CREATE INDEX sales_goals_workspace_period_idx ON sales_goals (workspace_id, period_start, period_end, status, id);
+CREATE INDEX sales_goals_workspace_owner_idx ON sales_goals (workspace_id, owner_user_id, status, period_end DESC, id DESC);
+CREATE UNIQUE INDEX meetings_workspace_external_event_unique_idx
+  ON meetings (workspace_id, provider, external_event_id) WHERE external_event_id IS NOT NULL;
 CREATE INDEX workspace_members_user_idx ON workspace_members (user_id, workspace_id);
 CREATE INDEX leads_workspace_normalized_email_idx ON leads (workspace_id, normalized_email);
 CREATE INDEX leads_workspace_normalized_phone_idx ON leads (workspace_id, normalized_phone);
@@ -619,6 +813,9 @@ INSERT INTO schema_migrations (version) VALUES
   ('005_phase0_data_correctness'),
   ('006_phase2_core_model'),
   ('007_phase4_productivity'),
-  ('008_phase5_quote_to_cash');
+  ('008_phase5_quote_to_cash'),
+  ('009_phase7_communications'),
+  ('010_phase6_goals_quotas'),
+  ('011_phase7_google_calendar');
 
 COMMIT;

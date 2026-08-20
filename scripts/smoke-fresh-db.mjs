@@ -12,6 +12,9 @@ const requiredTables = [
   'customers', 'accounts', 'contacts', 'pipelines', 'pipeline_stages', 'deals', 'deal_stage_history',
   'quotes', 'quote_items', 'invoices', 'tax_components', 'payments', 'credit_notes',
   'invoice_deliveries', 'financial_audit_events', 'schema_migrations',
+  'communication_integrations', 'email_templates', 'outbound_messages', 'notifications',
+  'sales_goals',
+  'integration_credentials', 'integration_oauth_states',
 ];
 const tables = await sql`
   SELECT table_name
@@ -30,6 +33,7 @@ const columns = await sql`
       OR (table_name = 'leads' AND column_name IN ('won_at', 'lost_at', 'normalized_email', 'normalized_phone'))
       OR (table_name = 'customers' AND column_name IN ('normalized_email', 'normalized_phone'))
       OR (table_name = 'deals' AND column_name IN ('amount', 'probability', 'expected_close_date'))
+      OR (table_name = 'meetings' AND column_name IN ('provider', 'external_event_id', 'meeting_url', 'sync_status', 'last_synced_at', 'end_time'))
       OR (table_name = 'invoices' AND column_name IN ('currency', 'quote_id', 'credited_amount', 'sent_at')))
 `;
 const presentColumns = new Set(columns.map(row => `${row.table_name}.${row.column_name}`));
@@ -39,6 +43,9 @@ const requiredColumns = [
   'customers.normalized_email', 'customers.normalized_phone', 'deals.amount',
   'deals.probability', 'deals.expected_close_date', 'invoices.currency', 'invoices.quote_id',
   'invoices.credited_amount', 'invoices.sent_at',
+  'meetings.provider', 'meetings.external_event_id', 'meetings.meeting_url',
+  'meetings.sync_status', 'meetings.last_synced_at',
+  'meetings.end_time',
 ];
 const missingColumns = requiredColumns.filter(column => !presentColumns.has(column));
 
@@ -48,6 +55,9 @@ const requiredMigrations = [
   '002_production_hardening', '003_workspace_foundation', '004_team_settings',
   '005_phase0_data_correctness', '006_phase2_core_model', '007_phase4_productivity',
   '008_phase5_quote_to_cash',
+  '009_phase7_communications',
+  '010_phase6_goals_quotas',
+  '011_phase7_google_calendar',
 ];
 const missingMigrations = requiredMigrations.filter(version => !presentMigrations.has(version));
 

@@ -7,6 +7,9 @@ const migration = fs.readFileSync(new URL('../../migrations/005_phase0_data_corr
 const phase2Migration = fs.readFileSync(new URL('../../migrations/006_phase2_core_model.sql', import.meta.url), 'utf8');
 const phase4Migration = fs.readFileSync(new URL('../../migrations/007_phase4_productivity.sql', import.meta.url), 'utf8');
 const phase5Migration = fs.readFileSync(new URL('../../migrations/008_phase5_quote_to_cash.sql', import.meta.url), 'utf8');
+const phase7Migration = fs.readFileSync(new URL('../../migrations/009_phase7_communications.sql', import.meta.url), 'utf8');
+const goalsMigration = fs.readFileSync(new URL('../../migrations/010_phase6_goals_quotas.sql', import.meta.url), 'utf8');
+const calendarMigration = fs.readFileSync(new URL('../../migrations/011_phase7_google_calendar.sql', import.meta.url), 'utf8');
 
 test('fresh schema includes the structures previously missing from Team Settings and Phase 0 reporting', () => {
   assert.match(schema, /CREATE TABLE workspace_invitations/);
@@ -73,4 +76,30 @@ test('fresh schema and Phase 5 migration include quote-to-cash financial integri
   assert.match(schema, /credited_amount NUMERIC\(14, 2\)/);
   assert.match(phase5Migration, /RAISE EXCEPTION 'Phase 5 invoice reconciliation failed'/);
   assert.match(phase5Migration, /ON CONFLICT \(version\) DO NOTHING/);
+});
+
+test('fresh schema and Phase 7 migration include communication and sync integrity records', () => {
+  for (const table of ['communication_integrations', 'email_templates', 'outbound_messages', 'notifications']) {
+    assert.match(schema, new RegExp(`CREATE TABLE ${table}`));
+    assert.match(phase7Migration, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+  assert.match(schema, /outbound_messages_target_check/);
+  assert.match(phase7Migration, /meetings_workspace_external_event_unique_idx/);
+  assert.match(phase7Migration, /009_phase7_communications/);
+});
+
+test('fresh schema and Phase 6 completion migration include goals and quota integrity', () => {
+  assert.match(schema, /CREATE TABLE sales_goals/);
+  assert.match(schema, /sales_goals_scope_owner_check/);
+  assert.match(goalsMigration, /CREATE TABLE IF NOT EXISTS sales_goals/);
+  assert.match(goalsMigration, /010_phase6_goals_quotas/);
+});
+
+test('fresh schema and Phase 7 calendar migration include secure OAuth credential records', () => {
+  for (const table of ['integration_credentials', 'integration_oauth_states']) {
+    assert.match(schema, new RegExp(`CREATE TABLE ${table}`));
+    assert.match(calendarMigration, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+  assert.match(schema, /meetings_end_after_start_check/);
+  assert.match(calendarMigration, /011_phase7_google_calendar/);
 });

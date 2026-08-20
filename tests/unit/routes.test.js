@@ -11,6 +11,7 @@ test('main CRM pages have stable URL mappings', () => {
   assert.equal(pathForPage('deals'), '/sales/deals');
   assert.equal(pathForPage('pipeline'), '/sales/pipeline');
   assert.equal(pathForPage('activities'), '/activities');
+  assert.equal(pathForPage('communications'), '/communications');
   assert.equal(pathForPage('reports'), '/reports');
   assert.equal(pathForPage('quotes'), '/quotes');
   assert.equal(pathForPage('invoices'), '/invoices');
@@ -21,6 +22,7 @@ test('main CRM pages have stable URL mappings', () => {
   assert.equal(pageFromPathname('/sales/deals'), 'deals');
   assert.equal(pageFromPathname('/sales/pipeline'), 'pipeline');
   assert.equal(pageFromPathname('/activities'), 'activities');
+  assert.equal(pageFromPathname('/communications'), 'communications');
   assert.equal(pageFromPathname('/my-day'), 'activities');
   assert.equal(pageFromPathname('/team'), 'team');
   assert.equal(pageFromPathname('/quotes'), 'quotes');

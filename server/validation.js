@@ -29,14 +29,21 @@ export function validateLead(body, { partial = false } = {}) {
   return result;
 }
 
-export function validateMeeting(body, { partial = false } = {}) {
+export function validateMeeting(body, { partial = false, current = null } = {}) {
   const input = object(body);
   const result = {};
 
   assign(result, 'lead_id', uuid(input, 'lead_id', { required: !partial, nullable: true }));
   assign(result, 'title', string(input, 'title', { required: !partial, min: 1, max: 200, trim: true }));
   assign(result, 'date_time', dateTime(input, 'date_time', { required: !partial }));
+  assign(result, 'end_time', nullableDateTime(input, 'end_time'));
   assign(result, 'notes', nullableString(input, 'notes', 10_000));
+
+  const start = result.date_time ?? current?.date_time;
+  const end = Object.prototype.hasOwnProperty.call(result, 'end_time') ? result.end_time : current?.end_time;
+  if (start && end && new Date(end).getTime() <= new Date(start).getTime()) {
+    invalid('end_time', 'must be after date_time');
+  }
 
   requireFieldsForUpdate(result, partial);
   return result;
@@ -172,6 +179,64 @@ export function validateContact(body, { partial = false } = {}) {
   assign(result, 'owner_user_id', nullableString(input, 'owner_user_id', 256));
 
   requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validateEmailTemplate(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+  assign(result, 'name', string(input, 'name', { required: !partial, min: 1, max: 120, trim: true }));
+  assign(result, 'subject', string(input, 'subject', { required: !partial, min: 1, max: 200, trim: true }));
+  assign(result, 'body_text', string(input, 'body_text', { required: !partial, min: 1, max: 20_000, trim: true }));
+  assign(result, 'body_html', nullableString(input, 'body_html', 100_000));
+  assign(result, 'is_active', boolean(input, 'is_active'));
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validateOutboundMessage(body) {
+  const input = object(body);
+  const result = {
+    recipient: email(input, 'recipient', { required: true }),
+    subject: string(input, 'subject', { required: true, min: 1, max: 200, trim: true }),
+    body_text: string(input, 'body_text', { required: true, min: 1, max: 20_000, trim: true }),
+    idempotency_key: string(input, 'idempotency_key', { required: true, min: 8, max: 128, trim: true }),
+  };
+  assign(result, 'body_html', nullableString(input, 'body_html', 100_000));
+  assign(result, 'template_id', uuid(input, 'template_id', { nullable: true }));
+  assign(result, 'retry_of_id', uuid(input, 'retry_of_id', { nullable: true }));
+  for (const field of ['lead_id', 'account_id', 'contact_id', 'deal_id']) {
+    assign(result, field, uuid(input, field, { nullable: true }));
+  }
+  if (!/^[A-Za-z0-9._:-]+$/.test(result.idempotency_key)) {
+    invalid('idempotency_key', 'may contain only letters, numbers, dot, underscore, colon and hyphen');
+  }
+  const targets = ['lead_id', 'account_id', 'contact_id', 'deal_id'].filter(field => result[field]);
+  if (targets.length !== 1) invalid('target', 'exactly one lead, account, contact or deal is required');
+  return result;
+}
+
+export function validateSalesGoal(body) {
+  const input = object(body);
+  const scope = enumeration(input, 'scope', ['team', 'owner']);
+  const metric = enumeration(input, 'metric', ['won_revenue', 'collected_revenue', 'deals_won']);
+  const result = {
+    name: string(input, 'name', { required: true, min: 1, max: 160, trim: true }),
+    scope: scope || invalid('scope', 'is required'),
+    metric: metric || invalid('metric', 'is required'),
+    target_value: number(input, 'target_value', { min: 0.01, max: 100_000_000_000 }),
+    period_start: date(input, 'period_start', { required: true }),
+    period_end: date(input, 'period_end', { required: true }),
+  };
+  const goalCurrency = currency(input, 'currency');
+  if (!goalCurrency) invalid('currency', 'is required');
+  result.currency = goalCurrency;
+  result.owner_user_id = nullableString(input, 'owner_user_id', 256) ?? null;
+  if (result.target_value === undefined) invalid('target_value', 'is required');
+  if (result.period_end < result.period_start) invalid('period_end', 'must be on or after period_start');
+  if (result.scope === 'owner' && !result.owner_user_id) invalid('owner_user_id', 'is required for owner goals');
+  if (result.scope === 'team' && result.owner_user_id) invalid('owner_user_id', 'must be empty for team goals');
+  if (result.metric === 'deals_won' && !Number.isInteger(result.target_value)) invalid('target_value', 'must be a whole number for deals won goals');
   return result;
 }
 

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const roots = ['api', 'server', 'src/lib', 'scripts', 'tests'];
+const roots = ['api', 'routes', 'server', 'src/lib', 'scripts', 'tests'];
 const files = roots.flatMap(root => collectJavaScriptFiles(path.resolve(root)));
 let failed = false;
 
