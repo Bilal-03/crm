@@ -6,6 +6,7 @@ const schema = fs.readFileSync(new URL('../../schema.sql', import.meta.url), 'ut
 const migration = fs.readFileSync(new URL('../../migrations/005_phase0_data_correctness.sql', import.meta.url), 'utf8');
 const phase2Migration = fs.readFileSync(new URL('../../migrations/006_phase2_core_model.sql', import.meta.url), 'utf8');
 const phase4Migration = fs.readFileSync(new URL('../../migrations/007_phase4_productivity.sql', import.meta.url), 'utf8');
+const phase5Migration = fs.readFileSync(new URL('../../migrations/008_phase5_quote_to_cash.sql', import.meta.url), 'utf8');
 
 test('fresh schema includes the structures previously missing from Team Settings and Phase 0 reporting', () => {
   assert.match(schema, /CREATE TABLE workspace_invitations/);
@@ -62,4 +63,14 @@ test('Phase 4 migration creates first-class productivity records and preserves l
   assert.match(phase4Migration, /md5\(concat_ws/);
   assert.match(phase4Migration, /ON CONFLICT \(version\) DO NOTHING/);
   assert.match(phase4Migration, /007_phase4_productivity/);
+});
+
+test('fresh schema and Phase 5 migration include quote-to-cash financial integrity records', () => {
+  for (const table of ['quotes', 'quote_items', 'tax_components', 'payments', 'credit_notes', 'invoice_deliveries', 'financial_audit_events']) {
+    assert.match(schema, new RegExp(`CREATE TABLE ${table}`));
+    assert.match(phase5Migration, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+  assert.match(schema, /credited_amount NUMERIC\(14, 2\)/);
+  assert.match(phase5Migration, /RAISE EXCEPTION 'Phase 5 invoice reconciliation failed'/);
+  assert.match(phase5Migration, /ON CONFLICT \(version\) DO NOTHING/);
 });

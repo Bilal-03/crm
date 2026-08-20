@@ -126,6 +126,7 @@ function mergeQueries(sql, resource, workspaceId, survivorId, duplicateIds) {
       sql`UPDATE activities SET contact_id = ${survivorId}, updated_at = NOW() WHERE workspace_id = ${workspaceId} AND contact_id = ANY(${ids}::uuid[])`,
       sql`UPDATE record_notes SET contact_id = ${survivorId}, updated_at = NOW() WHERE workspace_id = ${workspaceId} AND contact_id = ANY(${ids}::uuid[])`,
       sql`UPDATE deals SET primary_contact_id = ${survivorId}, updated_at = NOW() WHERE workspace_id = ${workspaceId} AND primary_contact_id = ANY(${ids}::uuid[])`,
+      sql`UPDATE quotes SET contact_id = ${survivorId}, updated_at = NOW() WHERE workspace_id = ${workspaceId} AND contact_id = ANY(${ids}::uuid[])`,
     );
   } else if (resource === 'accounts') {
     queries.push(
@@ -133,6 +134,7 @@ function mergeQueries(sql, resource, workspaceId, survivorId, duplicateIds) {
       sql`UPDATE record_notes SET account_id = ${survivorId}, updated_at = NOW() WHERE workspace_id = ${workspaceId} AND account_id = ANY(${ids}::uuid[])`,
       sql`UPDATE contacts SET account_id = ${survivorId}, updated_at = NOW() WHERE workspace_id = ${workspaceId} AND account_id = ANY(${ids}::uuid[])`,
       sql`UPDATE deals SET account_id = ${survivorId}, updated_at = NOW() WHERE workspace_id = ${workspaceId} AND account_id = ANY(${ids}::uuid[])`,
+      sql`UPDATE quotes SET account_id = ${survivorId}, updated_at = NOW() WHERE workspace_id = ${workspaceId} AND account_id = ANY(${ids}::uuid[])`,
     );
   } else {
     queries.push(
@@ -148,8 +150,8 @@ function preservedLinks(resource) {
   return resource === 'leads'
     ? ['activities', 'notes', 'meetings', 'contacts', 'deals']
     : resource === 'contacts'
-      ? ['activities', 'notes', 'deals']
+      ? ['activities', 'notes', 'deals', 'quotes']
       : resource === 'accounts'
-        ? ['activities', 'notes', 'contacts', 'deals']
+        ? ['activities', 'notes', 'contacts', 'deals', 'quotes']
         : ['invoices', 'contacts'];
 }

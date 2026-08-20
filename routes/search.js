@@ -67,12 +67,15 @@ export default withApiRoute({
         ORDER BY a.updated_at DESC, a.id DESC LIMIT ${limit}
       `,
       sql`
-        SELECT id, name AS title, COALESCE(company, email) AS subtitle, updated_at
-        FROM leads
-        WHERE workspace_id = ${workspace.id}
-          AND quote_items <> '[]'::jsonb
-          AND quote_items::text ILIKE ${pattern}
-        ORDER BY updated_at DESC, id DESC LIMIT ${limit}
+        SELECT q.id, q.quote_number AS title,
+               COALESCE(d.name, a.name, c.name, q.status) AS subtitle, q.updated_at
+        FROM quotes q
+        LEFT JOIN deals d ON d.id = q.deal_id AND d.workspace_id = q.workspace_id
+        LEFT JOIN accounts a ON a.id = q.account_id AND a.workspace_id = q.workspace_id
+        LEFT JOIN contacts c ON c.id = q.contact_id AND c.workspace_id = q.workspace_id
+        WHERE q.workspace_id = ${workspace.id}
+          AND (q.quote_number ILIKE ${pattern} OR d.name ILIKE ${pattern} OR a.name ILIKE ${pattern} OR c.name ILIKE ${pattern} OR q.status ILIKE ${pattern})
+        ORDER BY q.updated_at DESC, q.id DESC LIMIT ${limit}
       `,
     ]);
 
@@ -83,7 +86,7 @@ export default withApiRoute({
       ...deals.map(row => searchRow(row, 'deal', 'deals', '/sales/deals')),
       ...invoices.map(row => searchRow(row, 'invoice', 'invoices', '/invoices')),
       ...activities.map(row => searchRow(row, 'activity', 'activities', '/activities')),
-      ...quotes.map(row => searchRow(row, 'quote', 'quotes', '/sales/leads')),
+      ...quotes.map(row => searchRow(row, 'quote', 'quotes', '/quotes')),
     ].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, limit);
 
     return json(res, 200, { data: result.map(({ updated_at: _updatedAt, ...row }) => row) });

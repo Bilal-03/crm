@@ -15,6 +15,19 @@ CREATE TABLE workspaces (
   name VARCHAR(160) NOT NULL DEFAULT 'Personal CRM',
   base_currency CHAR(3) NOT NULL DEFAULT 'USD' CHECK (base_currency ~ '^[A-Z]{3}$'),
   timezone VARCHAR(64) NOT NULL DEFAULT 'UTC',
+  legal_name VARCHAR(200),
+  billing_email VARCHAR(320),
+  billing_phone VARCHAR(40),
+  billing_address JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(billing_address) = 'object'),
+  tax_registration_id VARCHAR(120),
+  quote_prefix VARCHAR(16) NOT NULL DEFAULT 'QUO',
+  invoice_prefix VARCHAR(16) NOT NULL DEFAULT 'INV',
+  credit_note_prefix VARCHAR(16) NOT NULL DEFAULT 'CRN',
+  next_quote_number INTEGER NOT NULL DEFAULT 1 CHECK (next_quote_number > 0),
+  next_invoice_number INTEGER NOT NULL DEFAULT 1 CHECK (next_invoice_number > 0),
+  next_credit_note_number INTEGER NOT NULL DEFAULT 1 CHECK (next_credit_note_number > 0),
+  default_quote_terms TEXT,
+  default_invoice_terms TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -329,6 +342,69 @@ CREATE TABLE saved_views (
   UNIQUE (workspace_id, owner_user_id, resource, name)
 );
 
+CREATE TABLE quotes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  deal_id UUID,
+  account_id UUID,
+  contact_id UUID,
+  source_lead_id UUID,
+  quote_number VARCHAR(64) NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+  status VARCHAR(24) NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'sent', 'viewed', 'accepted', 'rejected', 'expired', 'cancelled')),
+  issue_date DATE NOT NULL,
+  expiry_date DATE,
+  currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  discount_type VARCHAR(16) NOT NULL DEFAULT 'fixed'
+    CHECK (discount_type IN ('fixed', 'percent')),
+  discount_value NUMERIC(14, 4) NOT NULL DEFAULT 0 CHECK (discount_value >= 0),
+  discount_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (discount_amount >= 0),
+  subtotal NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
+  tax_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (tax_amount >= 0),
+  total_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
+  notes TEXT,
+  terms TEXT,
+  sent_at TIMESTAMPTZ,
+  viewed_at TIMESTAMPTZ,
+  accepted_at TIMESTAMPTZ,
+  rejected_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  revision_of_quote_id UUID,
+  created_by TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (id, workspace_id),
+  UNIQUE (workspace_id, quote_number, version),
+  CONSTRAINT quotes_workspace_deal_fk FOREIGN KEY (deal_id, workspace_id)
+    REFERENCES deals(id, workspace_id) ON DELETE SET NULL (deal_id),
+  CONSTRAINT quotes_workspace_account_fk FOREIGN KEY (account_id, workspace_id)
+    REFERENCES accounts(id, workspace_id) ON DELETE SET NULL (account_id),
+  CONSTRAINT quotes_workspace_contact_fk FOREIGN KEY (contact_id, workspace_id)
+    REFERENCES contacts(id, workspace_id) ON DELETE SET NULL (contact_id),
+  CONSTRAINT quotes_workspace_lead_fk FOREIGN KEY (source_lead_id, workspace_id)
+    REFERENCES leads(id, workspace_id) ON DELETE SET NULL (source_lead_id),
+  CONSTRAINT quotes_workspace_revision_fk FOREIGN KEY (revision_of_quote_id, workspace_id)
+    REFERENCES quotes(id, workspace_id) ON DELETE SET NULL (revision_of_quote_id),
+  CONSTRAINT quotes_expiry_check CHECK (expiry_date IS NULL OR expiry_date >= issue_date)
+);
+
+CREATE TABLE quote_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  quote_id UUID NOT NULL,
+  position INTEGER NOT NULL CHECK (position >= 0),
+  description VARCHAR(500) NOT NULL CHECK (length(trim(description)) > 0),
+  quantity NUMERIC(14, 4) NOT NULL CHECK (quantity > 0),
+  unit_price NUMERIC(14, 2) NOT NULL CHECK (unit_price >= 0),
+  amount NUMERIC(14, 2) NOT NULL CHECK (amount >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT quote_items_workspace_quote_fk FOREIGN KEY (quote_id, workspace_id)
+    REFERENCES quotes(id, workspace_id) ON DELETE CASCADE,
+  UNIQUE (quote_id, position)
+);
+
 CREATE UNIQUE INDEX deal_stage_history_legacy_lead_unique_idx
   ON deal_stage_history (workspace_id, source_lead_id)
   WHERE source_lead_id IS NOT NULL;
@@ -338,28 +414,154 @@ CREATE TABLE invoices (
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   customer_id UUID NOT NULL,
+  deal_id UUID,
+  quote_id UUID,
   invoice_number VARCHAR(64) NOT NULL,
   invoice_date DATE NOT NULL,
   due_date DATE NOT NULL CHECK (due_date >= invoice_date),
   status VARCHAR(24) NOT NULL DEFAULT 'draft'
-    CHECK (status IN ('draft', 'sent', 'paid', 'overdue', 'partial', 'cancelled')),
+    CHECK (status IN ('draft', 'sent', 'paid', 'overdue', 'partial', 'cancelled', 'void')),
+  currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   items JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(items) = 'array'),
   notes TEXT,
   terms TEXT,
   subtotal NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
+  tax_mode VARCHAR(16) NOT NULL DEFAULT 'exclusive'
+    CHECK (tax_mode IN ('exclusive', 'inclusive', 'mixed')),
   tax_rate NUMERIC(7, 4) NOT NULL DEFAULT 0 CHECK (tax_rate BETWEEN 0 AND 100),
   tax_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (tax_amount >= 0),
+  discount_type VARCHAR(16) NOT NULL DEFAULT 'fixed'
+    CHECK (discount_type IN ('fixed', 'percent')),
+  discount_value NUMERIC(14, 4) NOT NULL DEFAULT 0 CHECK (discount_value >= 0),
   discount_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (discount_amount >= 0),
   total_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0),
   amount_paid NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (amount_paid >= 0),
+  credited_amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (credited_amount >= 0),
   balance_due NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (balance_due >= 0),
+  sent_at TIMESTAMPTZ,
+  voided_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  created_by TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   paid_at TIMESTAMPTZ,
   CONSTRAINT invoices_workspace_customer_fk FOREIGN KEY (customer_id, workspace_id)
     REFERENCES customers (id, workspace_id) ON DELETE RESTRICT,
+  CONSTRAINT invoices_workspace_deal_fk FOREIGN KEY (deal_id, workspace_id)
+    REFERENCES deals (id, workspace_id) ON DELETE SET NULL (deal_id),
+  CONSTRAINT invoices_workspace_quote_fk FOREIGN KEY (quote_id, workspace_id)
+    REFERENCES quotes (id, workspace_id) ON DELETE SET NULL (quote_id),
+  UNIQUE (id, workspace_id),
   UNIQUE (workspace_id, invoice_number)
 );
+
+CREATE TABLE tax_components (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  quote_id UUID,
+  invoice_id UUID,
+  name VARCHAR(120) NOT NULL CHECK (length(trim(name)) > 0),
+  rate NUMERIC(7, 4) NOT NULL CHECK (rate BETWEEN 0 AND 100),
+  amount NUMERIC(14, 2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
+  inclusive BOOLEAN NOT NULL DEFAULT false,
+  position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT tax_components_target_check CHECK (num_nonnulls(quote_id, invoice_id) = 1),
+  CONSTRAINT tax_components_workspace_quote_fk FOREIGN KEY (quote_id, workspace_id)
+    REFERENCES quotes(id, workspace_id) ON DELETE CASCADE,
+  CONSTRAINT tax_components_workspace_invoice_fk FOREIGN KEY (invoice_id, workspace_id)
+    REFERENCES invoices(id, workspace_id) ON DELETE CASCADE
+);
+
+CREATE TABLE payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  invoice_id UUID NOT NULL,
+  amount NUMERIC(14, 2) NOT NULL CHECK (amount > 0),
+  currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  payment_date DATE NOT NULL,
+  payment_method VARCHAR(80),
+  transaction_reference VARCHAR(200),
+  notes TEXT,
+  status VARCHAR(16) NOT NULL DEFAULT 'settled' CHECK (status IN ('settled', 'void')),
+  voided_at TIMESTAMPTZ,
+  voided_by TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT payments_workspace_invoice_fk FOREIGN KEY (invoice_id, workspace_id)
+    REFERENCES invoices(id, workspace_id) ON DELETE RESTRICT
+);
+
+CREATE TABLE credit_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  invoice_id UUID NOT NULL,
+  credit_note_number VARCHAR(64) NOT NULL,
+  amount NUMERIC(14, 2) NOT NULL CHECK (amount > 0),
+  currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+  reason VARCHAR(1000) NOT NULL CHECK (length(trim(reason)) > 0),
+  status VARCHAR(16) NOT NULL DEFAULT 'issued' CHECK (status IN ('issued', 'void')),
+  issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  voided_at TIMESTAMPTZ,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT credit_notes_workspace_invoice_fk FOREIGN KEY (invoice_id, workspace_id)
+    REFERENCES invoices(id, workspace_id) ON DELETE RESTRICT,
+  UNIQUE (workspace_id, credit_note_number)
+);
+
+CREATE TABLE invoice_deliveries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  invoice_id UUID,
+  quote_id UUID,
+  recipient VARCHAR(320) NOT NULL,
+  provider VARCHAR(80) NOT NULL,
+  provider_message_id VARCHAR(256),
+  status VARCHAR(24) NOT NULL CHECK (status IN ('queued', 'sent', 'delivered', 'failed')),
+  sent_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  failed_at TIMESTAMPTZ,
+  failure_reason VARCHAR(1000),
+  retry_of_id UUID,
+  attempted_by TEXT NOT NULL,
+  request_id VARCHAR(128),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT invoice_deliveries_target_check CHECK (num_nonnulls(invoice_id, quote_id) = 1),
+  CONSTRAINT invoice_deliveries_workspace_invoice_fk FOREIGN KEY (invoice_id, workspace_id)
+    REFERENCES invoices(id, workspace_id) ON DELETE RESTRICT,
+  CONSTRAINT invoice_deliveries_workspace_quote_fk FOREIGN KEY (quote_id, workspace_id)
+    REFERENCES quotes(id, workspace_id) ON DELETE RESTRICT,
+  CONSTRAINT invoice_deliveries_retry_fk FOREIGN KEY (retry_of_id)
+    REFERENCES invoice_deliveries(id) ON DELETE SET NULL
+);
+
+CREATE TABLE financial_audit_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  actor_user_id TEXT NOT NULL,
+  action VARCHAR(120) NOT NULL,
+  entity_type VARCHAR(32) NOT NULL CHECK (entity_type IN ('quote', 'invoice', 'payment', 'credit_note', 'financial_settings')),
+  entity_id UUID,
+  before_state JSONB,
+  after_state JSONB,
+  request_id VARCHAR(128),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION prevent_financial_audit_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'Financial audit events are immutable';
+END;
+$$;
+
+CREATE TRIGGER financial_audit_events_immutable
+BEFORE UPDATE OR DELETE ON financial_audit_events
+FOR EACH ROW EXECUTE FUNCTION prevent_financial_audit_mutation();
 
 CREATE INDEX leads_workspace_created_idx ON leads (workspace_id, created_at DESC, id DESC);
 CREATE INDEX leads_workspace_stage_idx ON leads (workspace_id, stage, created_at DESC);
@@ -379,6 +581,17 @@ CREATE INDEX saved_views_workspace_resource_idx ON saved_views (workspace_id, re
 CREATE INDEX customers_workspace_created_idx ON customers (workspace_id, created_at DESC, id DESC);
 CREATE INDEX invoices_workspace_created_idx ON invoices (workspace_id, created_at DESC, id DESC);
 CREATE INDEX invoices_workspace_status_due_idx ON invoices (workspace_id, status, due_date);
+CREATE INDEX invoices_workspace_currency_idx ON invoices (workspace_id, currency, invoice_date DESC);
+CREATE INDEX invoices_workspace_deal_idx ON invoices (workspace_id, deal_id, created_at DESC);
+CREATE INDEX quotes_workspace_updated_idx ON quotes (workspace_id, updated_at DESC, id DESC);
+CREATE INDEX quotes_workspace_deal_idx ON quotes (workspace_id, deal_id, updated_at DESC);
+CREATE INDEX quote_items_quote_position_idx ON quote_items (workspace_id, quote_id, position);
+CREATE INDEX payments_workspace_invoice_idx ON payments (workspace_id, invoice_id, payment_date DESC, id DESC);
+CREATE INDEX payments_workspace_date_idx ON payments (workspace_id, payment_date DESC, id DESC);
+CREATE INDEX credit_notes_workspace_invoice_idx ON credit_notes (workspace_id, invoice_id, issued_at DESC);
+CREATE INDEX invoice_deliveries_workspace_invoice_idx ON invoice_deliveries (workspace_id, invoice_id, created_at DESC);
+CREATE INDEX invoice_deliveries_workspace_quote_idx ON invoice_deliveries (workspace_id, quote_id, created_at DESC);
+CREATE INDEX financial_audit_workspace_entity_idx ON financial_audit_events (workspace_id, entity_type, entity_id, created_at DESC);
 CREATE INDEX workspace_members_user_idx ON workspace_members (user_id, workspace_id);
 CREATE INDEX leads_workspace_normalized_email_idx ON leads (workspace_id, normalized_email);
 CREATE INDEX leads_workspace_normalized_phone_idx ON leads (workspace_id, normalized_phone);
@@ -405,6 +618,7 @@ INSERT INTO schema_migrations (version) VALUES
   ('004_team_settings'),
   ('005_phase0_data_correctness'),
   ('006_phase2_core_model'),
-  ('007_phase4_productivity');
+  ('007_phase4_productivity'),
+  ('008_phase5_quote_to_cash');
 
 COMMIT;

@@ -13,7 +13,7 @@ CRM Pro is a full-stack React application designed for small teams that need one
 | Pipeline | Kanban and table views with drag-and-drop stage updates |
 | Customers | Closed-won customer profiles and contact details |
 | Meetings | Upcoming and past meetings, Google Calendar links, and Google Meet links |
-| Invoices | Draft, send, edit, download PDF, track payment status, and identify overdue balances |
+| Revenue | Versioned quotes, protected invoice lifecycle, payments, credit notes, multi-currency PDFs, delivery history, and audit events |
 | Authentication | Clerk sign-in with tenant-scoped data access |
 | Notifications | In-app success and error feedback for important actions |
 
@@ -115,9 +115,10 @@ psql "$NEON_DATABASE_URL" -f migrations/004_team_settings.sql
 psql "$NEON_DATABASE_URL" -f migrations/005_phase0_data_correctness.sql
 psql "$NEON_DATABASE_URL" -f migrations/006_phase2_core_model.sql
 psql "$NEON_DATABASE_URL" -f migrations/007_phase4_productivity.sql
+psql "$NEON_DATABASE_URL" -f migrations/008_phase5_quote_to_cash.sql
 ```
 
-`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation, Phase 0 reporting, Phase 2 CRM core and Phase 4 productivity structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
+`schema.sql` is the canonical fresh-database schema and includes the latest team-invitation, reporting, CRM core, productivity, and Phase 5 quote-to-cash structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
 
 After migration, validate the Phase 0 backfill with:
 
@@ -200,6 +201,13 @@ npm run smoke:fresh-db # Verify the required Phase 2 schema on an isolated datab
 | `/api/imports` | POST | CSV/XLSX row preview, dry run, validation and transactional import |
 | `/api/duplicates` | GET, POST | Duplicate review and transactional merge with linked-record preservation |
 | `/api/invoices` | GET, POST, PUT, DELETE | Invoice lifecycle, totals, balances, and payment status |
+| `/api/invoices/actions` | POST | Cancel or void invoices and issue credit notes through protected lifecycle actions |
+| `/api/quotes` | GET, POST, PUT, DELETE | Versioned, deal-linked quotes and calculated tax components |
+| `/api/quotes/actions` | POST | Quote transitions, revisions, and accepted quote-to-invoice conversion |
+| `/api/payments` | GET, POST | Payment ledger and derived invoice reconciliation |
+| `/api/payments/actions` | POST | Permission-controlled payment voiding |
+| `/api/financial-settings` | GET, PUT | Company identity, currency, numbering prefixes, and document terms |
+| `/api/financial-events` | GET | Immutable audit events and invoice delivery history |
 | `/api/leads/bulk` | POST | Transactional bulk lead update/delete |
 | `/api/dashboard` | GET | Tenant-scoped dashboard aggregates and trends |
 | `/api/reports` | GET | Tenant-scoped period report aggregates |

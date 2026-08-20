@@ -69,6 +69,7 @@ import { ConfirmDialog } from './src/components/ui/ConfirmDialog.jsx';
 import { EmptyState } from './src/components/ui/EmptyState.jsx';
 import SalesWorkspace from './src/features/sales/SalesWorkspace.jsx';
 import ProductivityWorkspace from './src/features/productivity/ProductivityWorkspace.jsx';
+import RevenueWorkspace from './src/features/revenue/RevenueWorkspace.jsx';
 
 let pdfLibrariesPromise;
 const loadPdfLibraries = () => {
@@ -1385,21 +1386,13 @@ export default function CRMApp() {
               />
             )}
 
-            {currentPage === 'invoices' && (
-              <InvoicesPage 
-                invoices={invoices}
+            {['quotes', 'invoices', 'payments', 'financial-settings'].includes(currentPage) && (
+              <RevenueWorkspace
+                page={currentPage}
+                request={fetchApi}
+                deals={deals}
                 customers={customers}
-                onCreateInvoice={() => {
-                  setSelectedInvoice(null);
-                  setShowInvoiceModal(true);
-                }}
-                onEditInvoice={(invoice) => {
-                  setSelectedInvoice(invoice);
-                  setShowInvoiceModal(true);
-                }}
-                onDeleteInvoice={deleteInvoice}
-                onRequestConfirm={requestConfirm}
-                onSendInvoice={(invoice, customer) => sendInvoiceEmail(invoice, customer, getToken)}
+                onNavigate={navigateTo}
                 onNotify={notify}
               />
             )}
@@ -1532,7 +1525,10 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
     ] },
     { label: 'Operations', items: [
       { id: 'reports', icon: BarChart3, label: 'Reports' },
+      { id: 'quotes', icon: FileText, label: 'Quotes' },
       { id: 'invoices', icon: FileText, label: 'Invoices' },
+      { id: 'payments', icon: FileText, label: 'Payments' },
+      { id: 'financial-settings', icon: Settings, label: 'Financial settings' },
       { id: 'meetings', icon: Calendar, label: 'Meetings' },
     ] },
   ];

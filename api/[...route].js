@@ -9,12 +9,19 @@ import dealSummary from '../routes/deals/summary.js';
 import duplicates from '../routes/duplicates.js';
 import imports from '../routes/imports.js';
 import invoices from '../routes/invoices.js';
+import invoiceActions from '../routes/invoices/actions.js';
 import leads from '../routes/leads.js';
 import leadBulk from '../routes/leads/bulk.js';
 import leadConvert from '../routes/leads/convert.js';
 import meetings from '../routes/meetings.js';
 import notes from '../routes/notes.js';
 import pipelines from '../routes/pipelines.js';
+import payments from '../routes/payments.js';
+import paymentActions from '../routes/payments/actions.js';
+import quotes from '../routes/quotes.js';
+import quoteActions from '../routes/quotes/actions.js';
+import financialEvents from '../routes/financial-events.js';
+import financialSettings from '../routes/financial-settings.js';
 import reports from '../routes/reports.js';
 import savedViews from '../routes/saved-views.js';
 import search from '../routes/search.js';
@@ -32,6 +39,7 @@ const routeHandlers = {
   'deals/summary': dealSummary,
   duplicates,
   invoices,
+  'invoices/actions': invoiceActions,
   imports,
   leads,
   'leads/bulk': leadBulk,
@@ -39,6 +47,12 @@ const routeHandlers = {
   meetings,
   notes,
   pipelines,
+  payments,
+  'payments/actions': paymentActions,
+  quotes,
+  'quotes/actions': quoteActions,
+  'financial-events': financialEvents,
+  'financial-settings': financialSettings,
   reports,
   'saved-views': savedViews,
   search,

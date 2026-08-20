@@ -12,6 +12,10 @@ test('main CRM pages have stable URL mappings', () => {
   assert.equal(pathForPage('pipeline'), '/sales/pipeline');
   assert.equal(pathForPage('activities'), '/activities');
   assert.equal(pathForPage('reports'), '/reports');
+  assert.equal(pathForPage('quotes'), '/quotes');
+  assert.equal(pathForPage('invoices'), '/invoices');
+  assert.equal(pathForPage('payments'), '/payments');
+  assert.equal(pathForPage('financial-settings'), '/settings/financial');
   assert.equal(pageFromPathname('/leads'), 'leads');
   assert.equal(pageFromPathname('/sales/accounts'), 'accounts');
   assert.equal(pageFromPathname('/sales/deals'), 'deals');
@@ -19,6 +23,8 @@ test('main CRM pages have stable URL mappings', () => {
   assert.equal(pageFromPathname('/activities'), 'activities');
   assert.equal(pageFromPathname('/my-day'), 'activities');
   assert.equal(pageFromPathname('/team'), 'team');
+  assert.equal(pageFromPathname('/quotes'), 'quotes');
+  assert.equal(pageFromPathname('/payments'), 'payments');
 });
 
 test('unknown CRM pages fall back to the dashboard route', () => {

@@ -3,7 +3,8 @@ import { HttpError } from './http.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export const LEAD_STAGES = ['new', 'qualified', 'follow-up', 'proposal', 'closed-won', 'closed-lost'];
-export const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'partial', 'cancelled'];
+export const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'partial', 'cancelled', 'void'];
+export const QUOTE_STATUSES = ['draft', 'sent', 'viewed', 'accepted', 'rejected', 'expired', 'cancelled'];
 export const DEAL_STATUSES = ['open', 'won', 'lost'];
 export const FORECAST_CATEGORIES = ['omitted', 'pipeline', 'best_case', 'commit', 'closed'];
 export const ACTIVITY_TYPES = ['task', 'call', 'meeting', 'email', 'note', 'follow_up', 'other'];
@@ -251,12 +252,19 @@ export function validateInvoice(body, { partial = false, allowAmountPaid = true 
   const result = {};
 
   assign(result, 'customer_id', uuid(input, 'customer_id', { required: !partial }));
+  assign(result, 'deal_id', uuid(input, 'deal_id', { nullable: true }));
+  assign(result, 'quote_id', uuid(input, 'quote_id', { nullable: true }));
   assign(result, 'invoice_number', string(input, 'invoice_number', { min: 1, max: 64, trim: true }));
   assign(result, 'invoice_date', date(input, 'invoice_date', { required: !partial }));
   assign(result, 'due_date', date(input, 'due_date', { required: !partial }));
   assign(result, 'status', enumeration(input, 'status', INVOICE_STATUSES, { defaultValue: partial ? undefined : 'draft' }));
+  assign(result, 'currency', currency(input, 'currency'));
   assign(result, 'items', invoiceItems(input.items, { required: !partial }));
+  assign(result, 'tax_mode', enumeration(input, 'tax_mode', ['exclusive', 'inclusive', 'mixed'], { defaultValue: partial ? undefined : 'exclusive' }));
+  assign(result, 'tax_components', taxComponents(input.tax_components));
   assign(result, 'tax_rate', number(input, 'tax_rate', { min: 0, max: 100, defaultValue: partial ? undefined : 0 }));
+  assign(result, 'discount_type', enumeration(input, 'discount_type', ['fixed', 'percent'], { defaultValue: partial ? undefined : 'fixed' }));
+  assign(result, 'discount_value', number(input, 'discount_value', { min: 0, max: 1_000_000_000, defaultValue: partial ? undefined : 0 }));
   assign(result, 'discount_amount', number(input, 'discount_amount', { min: 0, max: 1_000_000_000, defaultValue: partial ? undefined : 0 }));
   if (allowAmountPaid) {
     assign(result, 'amount_paid', number(input, 'amount_paid', { min: 0, max: 1_000_000_000, defaultValue: partial ? undefined : 0 }));
@@ -267,6 +275,96 @@ export function validateInvoice(body, { partial = false, allowAmountPaid = true 
   assign(result, 'terms', nullableString(input, 'terms', 10_000));
 
   requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validateQuote(body, { partial = false } = {}) {
+  const input = object(body);
+  const result = {};
+  assign(result, 'deal_id', uuid(input, 'deal_id', { required: !partial, nullable: true }));
+  assign(result, 'account_id', uuid(input, 'account_id', { nullable: true }));
+  assign(result, 'contact_id', uuid(input, 'contact_id', { nullable: true }));
+  assign(result, 'issue_date', date(input, 'issue_date', { required: !partial }));
+  assign(result, 'expiry_date', nullableDate(input, 'expiry_date'));
+  assign(result, 'currency', currency(input, 'currency'));
+  assign(result, 'items', quoteLineItems(input.items, { required: !partial }));
+  assign(result, 'discount_type', enumeration(input, 'discount_type', ['fixed', 'percent'], { defaultValue: partial ? undefined : 'fixed' }));
+  assign(result, 'discount_value', number(input, 'discount_value', { min: 0, max: 1_000_000_000, defaultValue: partial ? undefined : 0 }));
+  assign(result, 'tax_components', taxComponents(input.tax_components));
+  assign(result, 'notes', nullableString(input, 'notes', 10_000));
+  assign(result, 'terms', nullableString(input, 'terms', 10_000));
+  if (result.expiry_date && result.issue_date && result.expiry_date < result.issue_date) {
+    invalid('expiry_date', 'must be on or after issue_date');
+  }
+  requireFieldsForUpdate(result, partial);
+  return result;
+}
+
+export function validatePayment(body) {
+  const input = object(body);
+  const amount = number(input, 'amount', { min: 0.01, max: 100_000_000_000 });
+  if (amount === undefined) invalid('amount', 'is required');
+  return {
+    invoice_id: uuid(input, 'invoice_id', { required: true }),
+    amount,
+    currency: currency(input, 'currency'),
+    payment_date: date(input, 'payment_date', { required: true }),
+    payment_method: nullableString(input, 'payment_method', 80) ?? null,
+    transaction_reference: nullableString(input, 'transaction_reference', 200) ?? null,
+    notes: nullableString(input, 'notes', 10_000) ?? null,
+  };
+}
+
+export function validateInvoiceAction(body) {
+  const input = object(body);
+  const action = enumeration(input, 'action', ['cancel', 'void', 'credit_note'], {});
+  if (!action) invalid('action', 'is required');
+  const result = {
+    invoice_id: uuid(input, 'invoice_id', { required: true }),
+    action,
+  };
+  assign(result, 'reason', nullableString(input, 'reason', 1_000));
+  assign(result, 'amount', number(input, 'amount', { min: 0.01, max: 100_000_000_000 }));
+  if (['void', 'credit_note'].includes(action) && !result.reason) invalid('reason', 'is required');
+  if (action === 'credit_note' && result.amount === undefined) invalid('amount', 'is required');
+  return result;
+}
+
+export function validateQuoteAction(body) {
+  const input = object(body);
+  const action = enumeration(input, 'action', ['send', 'view', 'accept', 'reject', 'cancel', 'revise', 'convert_to_invoice'], {});
+  if (!action) invalid('action', 'is required');
+  const result = {
+    quote_id: uuid(input, 'quote_id', { required: true }),
+    action,
+  };
+  assign(result, 'reason', nullableString(input, 'reason', 1_000));
+  assign(result, 'customer_id', uuid(input, 'customer_id', { nullable: true }));
+  assign(result, 'due_date', nullableDate(input, 'due_date'));
+  if (action === 'reject' && !result.reason) invalid('reason', 'is required');
+  if (action === 'convert_to_invoice' && (!result.customer_id || !result.due_date)) {
+    invalid('conversion', 'customer_id and due_date are required');
+  }
+  return result;
+}
+
+export function validateFinancialSettings(body) {
+  const input = object(body);
+  const result = {};
+  assign(result, 'legal_name', nullableString(input, 'legal_name', 200));
+  assign(result, 'billing_email', nullableEmail(input, 'billing_email'));
+  assign(result, 'billing_phone', nullableString(input, 'billing_phone', 40));
+  assign(result, 'billing_address', jsonObject(input, 'billing_address'));
+  assign(result, 'tax_registration_id', nullableString(input, 'tax_registration_id', 120));
+  assign(result, 'base_currency', currency(input, 'base_currency'));
+  for (const field of ['quote_prefix', 'invoice_prefix', 'credit_note_prefix']) {
+    const value = string(input, field, { min: 1, max: 16, trim: true });
+    if (value !== undefined && !/^[A-Za-z0-9_-]+$/.test(value)) invalid(field, 'may contain only letters, numbers, hyphens and underscores');
+    assign(result, field, value?.toUpperCase());
+  }
+  assign(result, 'default_quote_terms', nullableString(input, 'default_quote_terms', 10_000));
+  assign(result, 'default_invoice_terms', nullableString(input, 'default_invoice_terms', 10_000));
+  requireFieldsForUpdate(result, true);
   return result;
 }
 
@@ -487,14 +585,50 @@ function invoiceItems(value, { required = false } = {}) {
   return items.map(entry => {
     const input = object(entry);
     const quantity = number(input, 'quantity', { min: 0.0001, max: 1_000_000 });
-    const rate = number(input, 'rate', { min: 0, max: 1_000_000_000 });
+    const rateField = input.rate === undefined && input.unit_price !== undefined ? 'unit_price' : 'rate';
+    const rate = number(input, rateField, { min: 0, max: 1_000_000_000 });
     if (quantity === undefined) invalid('items.quantity', 'is required');
-    if (rate === undefined) invalid('items.rate', 'is required');
+    if (rate === undefined) invalid('items.rate', 'or unit_price is required');
     return {
       description: string(input, 'description', { required: true, min: 1, max: 500, trim: true }),
       quantity,
       rate,
       amount: Math.round(quantity * rate * 100) / 100,
+    };
+  });
+}
+
+function quoteLineItems(value, { required = false } = {}) {
+  if (value === undefined) {
+    if (required) invalid('items', 'is required');
+    return undefined;
+  }
+  const items = boundedArray(value, 'items', 100);
+  if (items.length === 0) invalid('items', 'must contain at least one item');
+  return items.map(entry => {
+    const input = object(entry);
+    const quantity = number(input, 'quantity', { min: 0.0001, max: 1_000_000 });
+    const unitPrice = number(input, 'unit_price', { min: 0, max: 1_000_000_000 });
+    if (quantity === undefined) invalid('items.quantity', 'is required');
+    if (unitPrice === undefined) invalid('items.unit_price', 'is required');
+    return {
+      description: string(input, 'description', { required: true, min: 1, max: 500, trim: true }),
+      quantity,
+      unit_price: unitPrice,
+    };
+  });
+}
+
+function taxComponents(value) {
+  if (value === undefined) return undefined;
+  return boundedArray(value, 'tax_components', 10).map(entry => {
+    const input = object(entry);
+    const rate = number(input, 'rate', { min: 0, max: 100 });
+    if (rate === undefined) invalid('tax_components.rate', 'is required');
+    return {
+      name: string(input, 'name', { required: true, min: 1, max: 120, trim: true }),
+      rate,
+      inclusive: boolean(input, 'inclusive', false),
     };
   });
 }
