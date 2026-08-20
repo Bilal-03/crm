@@ -9,6 +9,9 @@ const disconnect = read('../../routes/integrations/google-calendar/disconnect.js
 const calendarEvents = read('../../routes/calendar-events.js');
 const meetings = read('../../routes/meetings.js');
 const routes = read('../../api/[...route].js');
+const connectEntry = read('../../api/integrations/google-calendar/connect.js');
+const callbackEntry = read('../../api/integrations/google-calendar/callback.js');
+const disconnectEntry = read('../../api/integrations/google-calendar/disconnect.js');
 
 test('Google Calendar migration stores encrypted credentials and one-time OAuth state', () => {
   for (const table of ['integration_credentials', 'integration_oauth_states']) {
@@ -46,6 +49,12 @@ test('single Vercel handler exposes calendar OAuth and event sync routes', () =>
   for (const route of ['calendar-events', 'integrations/google-calendar/connect', 'integrations/google-calendar/callback', 'integrations/google-calendar/disconnect']) {
     assert.match(routes, new RegExp(route.replaceAll('/', '\\/')));
   }
+});
+
+test('nested Google OAuth URLs have explicit Vercel function entry points', () => {
+  assert.match(connectEntry, /routes\/integrations\/google-calendar\/connect\.js/);
+  assert.match(callbackEntry, /routes\/integrations\/google-calendar\/callback\.js/);
+  assert.match(disconnectEntry, /routes\/integrations\/google-calendar\/disconnect\.js/);
 });
 
 function read(path) { return fs.readFileSync(new URL(path, import.meta.url), 'utf8'); }
