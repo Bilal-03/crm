@@ -148,6 +148,7 @@ export function withApiRoute({ methods, handler, maxBodyBytes = DEFAULT_BODY_LIM
   const allowedMethods = new Set(methods);
 
   return async function apiRoute(req, res) {
+    const startedAt = Date.now();
     const requestId = normalizeRequestId(req.headers['x-request-id']);
     setSecurityHeaders(res, requestId);
 
@@ -164,13 +165,23 @@ export function withApiRoute({ methods, handler, maxBodyBytes = DEFAULT_BODY_LIM
     try {
       enforceBodyLimit(req, maxBodyBytes);
       const userId = await authenticate(req);
-      return await handler({ req, res, userId, requestId });
+      const result = await handler({ req, res, userId, requestId });
+      console.log(JSON.stringify({
+        level: 'info', event: 'api_request_completed', requestId,
+        method: req.method, path: req.url, statusCode: res.statusCode,
+        durationMs: Date.now() - startedAt,
+      }));
+      return result;
     } catch (error) {
       const databaseError = mapDatabaseError(error);
       const knownError = error instanceof HttpError ? error : databaseError;
       const statusCode = knownError?.statusCode ?? 500;
       const code = knownError?.code ?? 'internal_error';
       const message = knownError?.message ?? 'An unexpected error occurred.';
+
+      if (statusCode === 429 && knownError?.details?.retryAfter) {
+        res.setHeader('Retry-After', String(knownError.details.retryAfter));
+      }
 
       if (statusCode >= 500) {
         console.error(JSON.stringify({
@@ -179,6 +190,14 @@ export function withApiRoute({ methods, handler, maxBodyBytes = DEFAULT_BODY_LIM
           method: req.method,
           path: req.url,
           error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+
+      if (statusCode < 500) {
+        console.warn(JSON.stringify({
+          level: 'warn', event: 'api_request_rejected', requestId,
+          method: req.method, path: req.url, statusCode, code,
+          durationMs: Date.now() - startedAt,
         }));
       }
 

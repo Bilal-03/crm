@@ -10,6 +10,7 @@ import {
 } from '../server/http.js';
 import { getExplicitReportWindow, getReportWindow, REPORT_DEFINITIONS } from '../server/reporting.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET'],
@@ -17,6 +18,7 @@ export default withApiRoute({
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
     const filters = parseFilters(req.query, userId, workspace.base_currency);
+    if (!canAccessAllRecords(workspace)) filters.ownerUserId = userId;
     const window = reportWindow(req.query);
     const { currency, ownerUserId, pipelineId, source } = filters;
 

@@ -7,6 +7,7 @@ export const APP_ROUTES = Object.freeze([
   { id: 'pipeline', path: '/sales/pipeline' },
   { id: 'activities', path: '/activities' },
   { id: 'communications', path: '/communications' },
+  { id: 'automations', path: '/automations' },
   { id: 'meetings', path: '/meetings' },
   { id: 'invoices', path: '/invoices' },
   { id: 'quotes', path: '/quotes' },

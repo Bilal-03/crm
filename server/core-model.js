@@ -213,6 +213,7 @@ export function mapDealRow(row) {
 }
 
 export async function convertLeadToDeal(sql, workspace, userId, input) {
+  const accessAll = ['owner', 'admin'].includes(workspace.role);
   const leadRows = await sql`
     SELECT id, workspace_id, user_id, name, company, email, phone, source, stage,
            quote_items, won_at, lost_at, created_at, updated_at
@@ -228,6 +229,9 @@ export async function convertLeadToDeal(sql, workspace, userId, input) {
     WHERE workspace_id = ${workspace.id} AND source_lead_id = ${lead.id}
   `;
   if (existingRows[0]) {
+    if (!accessAll && existingRows[0].owner_user_id !== userId) {
+      throw new HttpError(403, 'record_access_denied', 'The converted deal is assigned to another team member.');
+    }
     await sql`
       INSERT INTO deal_stage_history (
         workspace_id, deal_id, pipeline_id, from_stage_id, to_stage_id, changed_by, source_lead_id
@@ -279,8 +283,10 @@ export async function convertLeadToDeal(sql, workspace, userId, input) {
         source_lead_id = COALESCE(contacts.source_lead_id, EXCLUDED.source_lead_id),
         updated_by = EXCLUDED.updated_by,
         updated_at = NOW()
+      WHERE ${accessAll} OR contacts.owner_user_id = ${userId}
       RETURNING id, account_id, name, email, phone
     `;
+    if (!contactRows[0]) throw new HttpError(409, 'record_access_denied', 'A matching contact belongs to another team member.');
     contact = contactRows[0];
   }
 
@@ -331,6 +337,7 @@ export async function convertLeadToDeal(sql, workspace, userId, input) {
 }
 
 async function createOrGetAccount(sql, workspace, userId, name) {
+  const accessAll = ['owner', 'admin'].includes(workspace.role);
   const normalizedName = normalizeName(name);
   const rows = await sql`
     INSERT INTO accounts (
@@ -340,8 +347,10 @@ async function createOrGetAccount(sql, workspace, userId, name) {
       ${workspace.id}, ${userId}, ${userId}, ${userId}, ${name}, ${normalizedName}
     )
     ON CONFLICT (workspace_id, normalized_name) DO UPDATE SET updated_by = EXCLUDED.updated_by, updated_at = NOW()
+    WHERE ${accessAll} OR accounts.owner_user_id = ${userId}
     RETURNING id, workspace_id, owner_user_id, name
   `;
+  if (!rows[0]) throw new HttpError(409, 'record_access_denied', 'A matching account belongs to another team member.');
   return rows[0];
 }
 

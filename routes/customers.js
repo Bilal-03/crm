@@ -11,12 +11,14 @@ import {
 import { validateCustomer } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
 import { normalizeEmail, normalizePhone } from '../server/normalization.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST'],
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const pagination = getPagination(req.query);
@@ -31,6 +33,7 @@ export default withApiRoute({
         SELECT id, name, company, email, phone, normalized_email, normalized_phone, created_at, updated_at, COUNT(*) OVER() AS __total_count
         FROM customers
         WHERE workspace_id = ${workspace.id}
+          AND (${accessAll} OR user_id = ${userId})
           AND (${search}::text IS NULL OR name ILIKE ${search ? `%${search}%` : null} OR company ILIKE ${search ? `%${search}%` : null} OR email ILIKE ${search ? `%${search}%` : null} OR phone ILIKE ${search ? `%${search}%` : null})
         ORDER BY ${sql.unsafe(orderBy)}
         LIMIT ${pagination.pageSize} OFFSET ${pagination.offset}

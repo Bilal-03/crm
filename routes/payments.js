@@ -19,12 +19,14 @@ import {
 } from '../server/http.js';
 import { validatePayment } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST'],
   async handler({ req, res, userId, requestId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const pagination = getPagination(req.query);
@@ -40,6 +42,7 @@ export default withApiRoute({
         FROM payments p
         JOIN invoices i ON i.id = p.invoice_id AND i.workspace_id = p.workspace_id
         WHERE p.workspace_id = ${workspace.id}
+          AND (${accessAll} OR i.user_id = ${userId})
           AND (${invoiceId}::uuid IS NULL OR p.invoice_id = ${invoiceId})
           AND (${status}::text IS NULL OR p.status = ${status})
           AND (${from}::date IS NULL OR p.payment_date >= ${from}::date)
@@ -52,6 +55,7 @@ export default withApiRoute({
     }
 
     const input = validatePayment(req.body);
+    await assertPaymentInvoiceAccess(sql, workspace.id, input.invoice_id, userId, accessAll);
     const invoice = await getInvoiceDetail(sql, workspace.id, input.invoice_id);
     if (['cancelled', 'void'].includes(invoice.status)) {
       throw new HttpError(409, 'financial_record_protected', 'Payments cannot be recorded against a cancelled or void invoice.');
@@ -100,6 +104,15 @@ export default withApiRoute({
     });
   },
 });
+
+async function assertPaymentInvoiceAccess(sql, workspaceId, invoiceId, userId, accessAll) {
+  if (accessAll) return;
+  const rows = await sql`
+    SELECT id FROM invoices
+    WHERE id = ${invoiceId} AND workspace_id = ${workspaceId} AND user_id = ${userId}
+  `;
+  if (!rows[0]) throw new HttpError(403, 'record_access_denied', 'Your role can access only payments for invoices assigned to you.');
+}
 
 function paymentAuditQuery(sql, { workspaceId, actorUserId, paymentId, invoiceId, amount, currency, paymentDate, requestId }) {
   return sql`

@@ -2,6 +2,7 @@ import { getDb } from '../../server/db.js';
 import { HttpError, json, withApiRoute } from '../../server/http.js';
 import { validateBulkLeadOperation } from '../../server/validation.js';
 import { getActiveWorkspace } from '../../server/workspaces.js';
+import { canAccessAllRecords } from '../../server/authorization.js';
 
 export default withApiRoute({
   methods: ['POST'],
@@ -9,6 +10,7 @@ export default withApiRoute({
     const operation = validateBulkLeadOperation(req.body);
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (operation.action === 'update') {
       const rows = await sql`
@@ -25,11 +27,13 @@ export default withApiRoute({
           END,
           updated_at = NOW()
         WHERE workspace_id = ${workspace.id}
+          AND (${accessAll} OR user_id = ${userId})
           AND id = ANY(${operation.ids}::uuid[])
           AND (
             SELECT COUNT(*)
             FROM leads
             WHERE workspace_id = ${workspace.id}
+              AND (${accessAll} OR user_id = ${userId})
               AND id = ANY(${operation.ids}::uuid[])
           ) = ${operation.ids.length}
         RETURNING id, stage, updated_at, won_at, lost_at
@@ -41,11 +45,13 @@ export default withApiRoute({
     const rows = await sql`
       DELETE FROM leads
       WHERE workspace_id = ${workspace.id}
+        AND (${accessAll} OR user_id = ${userId})
         AND id = ANY(${operation.ids}::uuid[])
         AND (
           SELECT COUNT(*)
           FROM leads
           WHERE workspace_id = ${workspace.id}
+            AND (${accessAll} OR user_id = ${userId})
             AND id = ANY(${operation.ids}::uuid[])
         ) = ${operation.ids.length}
       RETURNING id

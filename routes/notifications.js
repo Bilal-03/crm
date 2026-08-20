@@ -8,6 +8,7 @@ import {
   withApiRoute,
 } from '../server/http.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { materializeOverdueNotifications } from '../server/notifications.js';
 
 export default withApiRoute({
   methods: ['GET', 'PUT'],
@@ -16,11 +17,13 @@ export default withApiRoute({
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
 
     if (req.method === 'GET') {
+      await materializeOverdueNotifications(sql, workspace.id, userId);
       const pagination = getPagination(req.query);
       const state = getQueryEnum(req.query, 'state', ['unread', 'read', 'all']) || 'all';
       const [rows, countRows] = await Promise.all([
         sql`
-          SELECT id, type, title, body, entity_type, entity_id, status, read_at, created_at
+          SELECT id, type, title, body, entity_type, entity_id, action_url, metadata,
+                 status, read_at, created_at
           FROM notifications
           WHERE workspace_id = ${workspace.id} AND recipient_user_id = ${userId}
             AND (${state} = 'all' OR status = ${state})
@@ -56,7 +59,8 @@ export default withApiRoute({
       UPDATE notifications SET status = ${nextStatus},
         read_at = CASE WHEN ${nextStatus} = 'read' THEN COALESCE(read_at, NOW()) ELSE read_at END
       WHERE id = ${id} AND workspace_id = ${workspace.id} AND recipient_user_id = ${userId}
-      RETURNING id, type, title, body, entity_type, entity_id, status, read_at, created_at
+      RETURNING id, type, title, body, entity_type, entity_id, action_url, metadata,
+                status, read_at, created_at
     `;
     if (!rows[0]) throw new HttpError(404, 'not_found', 'Notification not found.');
     return json(res, 200, { data: rows[0] });

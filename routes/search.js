@@ -1,12 +1,14 @@
 import { getDb } from '../server/db.js';
 import { getQueryInteger, getQueryString, json, withApiRoute } from '../server/http.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET'],
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
     const query = getQueryString(req.query, 'q', 160);
     const limit = getQueryInteger(req.query, 'limit', 12, 1, 50);
     if (!query || query.length < 2) return json(res, 200, { data: [] });
@@ -17,6 +19,7 @@ export default withApiRoute({
         SELECT id, name AS title, COALESCE(company, email, phone) AS subtitle, updated_at
         FROM leads
         WHERE workspace_id = ${workspace.id}
+          AND (${accessAll} OR user_id = ${userId})
           AND (name ILIKE ${pattern} OR company ILIKE ${pattern} OR email ILIKE ${pattern} OR phone ILIKE ${pattern})
         ORDER BY updated_at DESC, id DESC LIMIT ${limit}
       `,
@@ -24,6 +27,7 @@ export default withApiRoute({
         SELECT id, name AS title, COALESCE(title, email, phone) AS subtitle, updated_at
         FROM contacts
         WHERE workspace_id = ${workspace.id}
+          AND (${accessAll} OR owner_user_id = ${userId})
           AND (name ILIKE ${pattern} OR title ILIKE ${pattern} OR email ILIKE ${pattern} OR phone ILIKE ${pattern})
         ORDER BY updated_at DESC, id DESC LIMIT ${limit}
       `,
@@ -31,6 +35,7 @@ export default withApiRoute({
         SELECT id, name AS title, COALESCE(domain, industry, phone) AS subtitle, updated_at
         FROM accounts
         WHERE workspace_id = ${workspace.id}
+          AND (${accessAll} OR owner_user_id = ${userId})
           AND (name ILIKE ${pattern} OR domain ILIKE ${pattern} OR industry ILIKE ${pattern} OR phone ILIKE ${pattern})
         ORDER BY updated_at DESC, id DESC LIMIT ${limit}
       `,
@@ -42,6 +47,7 @@ export default withApiRoute({
           LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
           LEFT JOIN pipeline_stages s ON s.id = d.stage_id AND s.workspace_id = d.workspace_id
           WHERE d.workspace_id = ${workspace.id}
+            AND (${accessAll} OR d.owner_user_id = ${userId})
         ) matches
         WHERE name ILIKE ${pattern} OR account_name ILIKE ${pattern} OR stage_name ILIKE ${pattern} OR status ILIKE ${pattern}
         ORDER BY updated_at DESC, id DESC LIMIT ${limit}
@@ -51,6 +57,7 @@ export default withApiRoute({
         FROM invoices i
         JOIN customers c ON c.id = i.customer_id AND c.workspace_id = i.workspace_id
         WHERE i.workspace_id = ${workspace.id}
+          AND (${accessAll} OR i.user_id = ${userId})
           AND (i.invoice_number ILIKE ${pattern} OR c.name ILIKE ${pattern} OR c.company ILIKE ${pattern} OR i.status ILIKE ${pattern})
         ORDER BY i.updated_at DESC, i.id DESC LIMIT ${limit}
       `,
@@ -63,6 +70,7 @@ export default withApiRoute({
         LEFT JOIN contacts c ON c.id = a.contact_id AND c.workspace_id = a.workspace_id
         LEFT JOIN deals d ON d.id = a.deal_id AND d.workspace_id = a.workspace_id
         WHERE a.workspace_id = ${workspace.id}
+          AND (${accessAll} OR a.owner_user_id = ${userId})
           AND (a.subject ILIKE ${pattern} OR a.description ILIKE ${pattern} OR a.message ILIKE ${pattern})
         ORDER BY a.updated_at DESC, a.id DESC LIMIT ${limit}
       `,
@@ -74,6 +82,7 @@ export default withApiRoute({
         LEFT JOIN accounts a ON a.id = q.account_id AND a.workspace_id = q.workspace_id
         LEFT JOIN contacts c ON c.id = q.contact_id AND c.workspace_id = q.workspace_id
         WHERE q.workspace_id = ${workspace.id}
+          AND (${accessAll} OR q.created_by = ${userId} OR d.owner_user_id = ${userId})
           AND (q.quote_number ILIKE ${pattern} OR d.name ILIKE ${pattern} OR a.name ILIKE ${pattern} OR c.name ILIKE ${pattern} OR q.status ILIKE ${pattern})
         ORDER BY q.updated_at DESC, q.id DESC LIMIT ${limit}
       `,

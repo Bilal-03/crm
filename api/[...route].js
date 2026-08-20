@@ -37,6 +37,7 @@ import search from '../routes/search.js';
 import sendInvoiceEmail from '../routes/send-invoice-email.js';
 import team from '../routes/team.js';
 import emailTemplates from '../routes/email-templates.js';
+import automations from '../routes/automations.js';
 
 const routeHandlers = {
   accounts,
@@ -78,6 +79,7 @@ const routeHandlers = {
   'send-invoice-email': sendInvoiceEmail,
   team,
   'email-templates': emailTemplates,
+  automations,
 };
 
 export default function handler(req, res) {

@@ -13,7 +13,7 @@ import {
   Mail, Phone, Building2, Clock, AlertCircle, CheckCircle2,
   LayoutGrid, List, Menu, User, Bell, TrendingUp, Activity,
   Flame, Sun, Snowflake, FileDown, DollarSign, Send, Eye, Printer, BarChart3,
-  Settings, UserPlus, UserMinus, Shield, ListTodo
+  Settings, UserPlus, UserMinus, Shield, ListTodo, Workflow
 } from 'lucide-react';
 
 // Add global styles for Light Theme
@@ -72,6 +72,7 @@ import ProductivityWorkspace from './src/features/productivity/ProductivityWorks
 import RevenueWorkspace from './src/features/revenue/RevenueWorkspace.jsx';
 import ReportingWorkspace from './src/features/reporting/ReportingWorkspace.jsx';
 import CommunicationsWorkspace from './src/features/communications/CommunicationsWorkspace.jsx';
+import AutomationsWorkspace from './src/features/automations/AutomationsWorkspace.jsx';
 
 let pdfLibrariesPromise;
 const loadPdfLibraries = () => {
@@ -1401,6 +1402,15 @@ export default function CRMApp() {
                 onNotify={notify}
               />
             )}
+
+            {currentPage === 'automations' && (
+              <AutomationsWorkspace
+                request={fetchApi}
+                members={teamData?.members || []}
+                pipelines={pipelines}
+                onNotify={notify}
+              />
+            )}
             
             {currentPage === 'meetings' && (
               <MeetingsPage 
@@ -1552,6 +1562,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
     { label: 'Productivity', items: [
       { id: 'activities', icon: ListTodo, label: 'My Day' },
       { id: 'communications', icon: Mail, label: 'Communications' },
+      { id: 'automations', icon: Workflow, label: 'Automations' },
     ] },
     { label: 'Sales', items: [
       { id: 'leads', icon: Users, label: 'Leads' },

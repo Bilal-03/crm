@@ -13,12 +13,14 @@ import {
 } from '../server/http.js';
 import { validateRecordNote } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { notifyMentions } from '../server/notifications.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 const TARGETS = [
-  ['lead_id', 'leads', 'Lead'],
-  ['account_id', 'accounts', 'Account'],
-  ['contact_id', 'contacts', 'Contact'],
-  ['deal_id', 'deals', 'Deal'],
+  ['lead_id', 'leads', 'Lead', 'user_id'],
+  ['account_id', 'accounts', 'Account', 'owner_user_id'],
+  ['contact_id', 'contacts', 'Contact', 'owner_user_id'],
+  ['deal_id', 'deals', 'Deal', 'owner_user_id'],
 ];
 
 export default withApiRoute({
@@ -26,6 +28,7 @@ export default withApiRoute({
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const pagination = getPagination(req.query);
@@ -42,6 +45,8 @@ export default withApiRoute({
         LEFT JOIN contacts c ON c.id = n.contact_id AND c.workspace_id = n.workspace_id
         LEFT JOIN deals d ON d.id = n.deal_id AND d.workspace_id = n.workspace_id
         WHERE n.workspace_id = ${workspace.id}
+          AND (${accessAll} OR l.user_id = ${userId} OR a.owner_user_id = ${userId}
+            OR c.owner_user_id = ${userId} OR d.owner_user_id = ${userId})
           AND (${search}::text IS NULL OR n.body ILIKE ${search ? `%${search}%` : null})
           AND (${filters[0][1]}::uuid IS NULL OR n.lead_id = ${filters[0][1]})
           AND (${filters[1][1]}::uuid IS NULL OR n.account_id = ${filters[1][1]})
@@ -56,7 +61,7 @@ export default withApiRoute({
 
     if (req.method === 'POST') {
       const input = validateRecordNote(req.body);
-      await assertSingleTarget(sql, workspace.id, input);
+      await assertSingleTarget(sql, workspace.id, input, userId, accessAll);
       const rows = await sql`
         INSERT INTO record_notes (
           workspace_id, lead_id, account_id, contact_id, deal_id,
@@ -69,6 +74,14 @@ export default withApiRoute({
         )
         RETURNING *
       `;
+      await notifyMentions(sql, {
+        workspaceId: workspace.id,
+        actorUserId: userId,
+        text: input.body,
+        entityType: 'note',
+        entityId: rows[0].id,
+        actionUrl: targetUrl(input),
+      });
       return json(res, 201, { data: mapNoteRow(rows[0]) });
     }
 
@@ -78,6 +91,7 @@ export default withApiRoute({
     `;
     const existing = existingRows[0];
     if (!existing) throw new HttpError(404, 'not_found', 'Note not found.');
+    await assertSingleTarget(sql, workspace.id, existing, userId, accessAll);
     assertCanEdit(existing, workspace.role, userId);
 
     if (req.method === 'PUT') {
@@ -88,7 +102,7 @@ export default withApiRoute({
       if (hasTarget) {
         const target = targetFields.filter(field => input[field]);
         if (target.length !== 1) throw new HttpError(400, 'validation_error', 'Exactly one record target is required.');
-        await assertSingleTarget(sql, workspace.id, input);
+        await assertSingleTarget(sql, workspace.id, input, userId, accessAll);
       }
       const rows = await sql`
         UPDATE record_notes
@@ -102,6 +116,16 @@ export default withApiRoute({
         WHERE id = ${id} AND workspace_id = ${workspace.id}
         RETURNING *
       `;
+      if (has('body')) {
+        await notifyMentions(sql, {
+          workspaceId: workspace.id,
+          actorUserId: userId,
+          text: input.body,
+          entityType: 'note',
+          entityId: rows[0].id,
+          actionUrl: targetUrl(rows[0]),
+        });
+      }
       return json(res, 200, { data: mapNoteRow(rows[0]) });
     }
 
@@ -110,21 +134,29 @@ export default withApiRoute({
   },
 });
 
-async function assertSingleTarget(sql, workspaceId, input) {
+async function assertSingleTarget(sql, workspaceId, input, userId, accessAll) {
   const target = TARGETS.find(([field]) => input[field]);
   if (!target) throw new HttpError(400, 'validation_error', 'Exactly one record target is required.');
-  const [, table, label] = target;
+  const [, table, label, ownerColumn] = target;
   const rows = await sql`
     SELECT id FROM ${sql.unsafe(table)}
     WHERE id = ${input[target[0]]} AND workspace_id = ${workspaceId}
+      AND (${accessAll} OR ${sql.unsafe(ownerColumn)} = ${userId})
   `;
-  if (!rows[0]) throw new HttpError(400, 'invalid_reference', `${label} does not exist in this workspace.`);
+  if (!rows[0]) throw new HttpError(403, 'record_access_denied', `${label} is not available to your role.`);
 }
 
 function assertCanEdit(note, role, userId) {
   if (note.author_user_id !== userId && !['owner', 'admin'].includes(role)) {
     throw new HttpError(403, 'note_permission_denied', 'Only the note author or a workspace manager can change this note.');
   }
+}
+
+function targetUrl(note) {
+  if (note.lead_id) return '/leads';
+  if (note.contact_id) return '/contacts';
+  if (note.account_id) return '/accounts';
+  return '/deals';
 }
 
 function mapNoteRow(row) {

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:e2e
+        env:
+          E2E_REQUIRED: '1'
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_CLERK_TOKEN: ${{ secrets.E2E_CLERK_TOKEN }}
+          E2E_WORKSPACE_ID: ${{ secrets.E2E_WORKSPACE_ID }}

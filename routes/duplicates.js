@@ -2,14 +2,15 @@ import { getDb } from '../server/db.js';
 import { getQueryEnum, getQueryInteger, HttpError, json, withApiRoute } from '../server/http.js';
 import { validateMergeRequest } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 const RESOURCES = ['leads', 'contacts', 'accounts', 'customers'];
 
 const CONFIG = Object.freeze({
-  leads: { table: 'leads', fields: ['name', 'company', 'email', 'phone', 'source', 'stage', 'normalized_email', 'normalized_phone'] },
-  contacts: { table: 'contacts', fields: ['name', 'title', 'email', 'phone', 'normalized_email', 'normalized_phone'] },
-  accounts: { table: 'accounts', fields: ['name', 'domain', 'phone', 'website', 'industry', 'normalized_name', 'normalized_domain'] },
-  customers: { table: 'customers', fields: ['name', 'company', 'email', 'phone', 'normalized_email', 'normalized_phone'] },
+  leads: { table: 'leads', owner: 'user_id', fields: ['name', 'company', 'email', 'phone', 'source', 'stage', 'normalized_email', 'normalized_phone'] },
+  contacts: { table: 'contacts', owner: 'owner_user_id', fields: ['name', 'title', 'email', 'phone', 'normalized_email', 'normalized_phone'] },
+  accounts: { table: 'accounts', owner: 'owner_user_id', fields: ['name', 'domain', 'phone', 'website', 'industry', 'normalized_name', 'normalized_domain'] },
+  customers: { table: 'customers', owner: 'user_id', fields: ['name', 'company', 'email', 'phone', 'normalized_email', 'normalized_phone'] },
 });
 
 export default withApiRoute({
@@ -21,6 +22,7 @@ export default withApiRoute({
     const config = CONFIG[resource];
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const limit = getQueryInteger(req.query, 'limit', 50, 1, 200);
@@ -28,6 +30,7 @@ export default withApiRoute({
         SELECT id, ${sql.unsafe(config.fields.join(', '))}
         FROM ${sql.unsafe(config.table)}
         WHERE workspace_id = ${workspace.id}
+          AND (${accessAll} OR ${sql.unsafe(config.owner)} = ${userId})
         ORDER BY updated_at DESC, id DESC
         LIMIT ${limit * 10}
       `;
@@ -35,10 +38,12 @@ export default withApiRoute({
     }
 
     const input = validateMergeRequest(req.body);
+    if (!accessAll) throw new HttpError(403, 'manager_required', 'Only workspace managers can merge duplicate records.');
     const ids = [input.survivor_id, ...input.duplicate_ids];
     const rows = await sql`
       SELECT id FROM ${sql.unsafe(config.table)}
       WHERE workspace_id = ${workspace.id} AND id = ANY(${ids}::uuid[])
+        AND (${accessAll} OR ${sql.unsafe(config.owner)} = ${userId})
     `;
     if (rows.length !== ids.length) throw new HttpError(409, 'merge_conflict', 'One or more records no longer exist in this workspace.');
     const queries = mergeQueries(sql, resource, workspace.id, input.survivor_id, input.duplicate_ids);

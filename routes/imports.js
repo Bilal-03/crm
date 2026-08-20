@@ -9,6 +9,7 @@ import {
   validateLead,
 } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { consumeRateLimit } from '../server/rate-limit.js';
 
 const IMPORT_RESOURCES = ['leads', 'contacts', 'accounts', 'customers'];
 
@@ -73,6 +74,9 @@ export default withApiRoute({
     }
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    await consumeRateLimit(sql, {
+      workspaceId: workspace.id, subject: userId, scope: 'data_import', limit: 10, windowSeconds: 3600,
+    });
     const plan = await buildImportPlan(sql, workspace.id, userId, input, config);
 
     if (input.mode !== 'import') {

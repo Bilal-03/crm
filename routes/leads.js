@@ -15,12 +15,15 @@ import {
 import { validateLead } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
 import { normalizeEmail, normalizePhone } from '../server/normalization.js';
+import { enqueueAutomationEvent, processAutomationJobs } from '../server/automations.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const pagination = getPagination(req.query);
@@ -73,6 +76,7 @@ export default withApiRoute({
                created_at, updated_at, won_at, lost_at, COUNT(*) OVER() AS __total_count
         FROM leads
         WHERE workspace_id = ${workspace.id}
+          AND (${accessAll} OR user_id = ${userId})
           AND (${search}::text IS NULL OR name ILIKE ${search ? `%${search}%` : null} OR company ILIKE ${search ? `%${search}%` : null} OR email ILIKE ${search ? `%${search}%` : null} OR source ILIKE ${search ? `%${search}%` : null})
           AND (${stage}::text IS NULL OR stage = ${stage})
           AND (${source}::text IS NULL OR source = ${source})
@@ -99,6 +103,16 @@ export default withApiRoute({
         RETURNING id, name, company, email, phone, normalized_email, normalized_phone, source, stage, notes, reminders, quote_items,
                   created_at, updated_at, won_at, lost_at
       `;
+      await enqueueAutomationEvent(sql, {
+        workspaceId: workspace.id,
+        eventKey: `lead_created:${rows[0].id}`,
+        triggerType: 'lead_created',
+        entityType: 'lead',
+        entityId: rows[0].id,
+        payload: { ...rows[0], owner_user_id: userId, actor_user_id: userId },
+        occurredAt: rows[0].created_at,
+      });
+      await processAutomationJobs(sql, { limit: 10, workspaceId: workspace.id });
       return json(res, 201, { data: rows[0] });
     }
 
@@ -132,7 +146,7 @@ export default withApiRoute({
             ELSE lost_at
           END,
           updated_at = NOW()
-        WHERE id = ${id} AND workspace_id = ${workspace.id}
+        WHERE id = ${id} AND workspace_id = ${workspace.id} AND (${accessAll} OR user_id = ${userId})
         RETURNING id, name, company, email, phone, normalized_email, normalized_phone, source, stage, notes, reminders, quote_items,
                   created_at, updated_at, won_at, lost_at
       `;
@@ -141,7 +155,7 @@ export default withApiRoute({
       return json(res, 200, { data: rows[0] });
     }
 
-    const deleted = await sql`DELETE FROM leads WHERE id = ${id} AND workspace_id = ${workspace.id} RETURNING id`;
+    const deleted = await sql`DELETE FROM leads WHERE id = ${id} AND workspace_id = ${workspace.id} AND (${accessAll} OR user_id = ${userId}) RETURNING id`;
     if (!deleted[0]) throw new HttpError(404, 'not_found', 'Lead not found.');
     return noContent(res);
   },

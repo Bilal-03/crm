@@ -3,6 +3,7 @@ import { googleEventId } from '../server/calendar-providers/google.js';
 import { getDb } from '../server/db.js';
 import { HttpError, json, withApiRoute } from '../server/http.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['POST'],
@@ -16,10 +17,12 @@ export default withApiRoute({
 
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
     const meetingRows = await sql`
-      SELECT id, workspace_id, lead_id, title, date_time, end_time, notes, integration_id,
+      SELECT id, workspace_id, user_id, lead_id, title, date_time, end_time, notes, integration_id,
              provider, external_event_id, meeting_url, sync_status, sync_error, last_synced_at
       FROM meetings WHERE id = ${meetingId} AND workspace_id = ${workspace.id}
+        AND (${accessAll} OR user_id = ${userId})
     `;
     const meeting = meetingRows[0];
     if (!meeting) throw new HttpError(404, 'not_found', 'Meeting not found.');
@@ -42,6 +45,7 @@ export default withApiRoute({
           WHERE id = ${meeting.id} AND workspace_id = ${workspace.id}
           RETURNING *
         `;
+        await upsertMeetingTimeline(sql, workspace.id, userId, deleted[0]);
         return json(res, 200, { data: deleted[0] });
       }
 
@@ -67,6 +71,7 @@ export default withApiRoute({
         UPDATE communication_integrations SET last_synced_at = NOW(), last_error = NULL, updated_at = NOW()
         WHERE id = ${connection.id} AND workspace_id = ${workspace.id}
       `;
+      await upsertMeetingTimeline(sql, workspace.id, userId, synced[0]);
       return json(res, 200, { data: synced[0] });
     } catch (error) {
       if (error instanceof HttpError) throw error;
@@ -95,4 +100,35 @@ export default withApiRoute({
 function providerErrorMessage(error) {
   const message = error instanceof Error ? error.message : 'Unknown Google Calendar error.';
   return message.replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [redacted]').slice(0, 1_000);
+}
+
+async function upsertMeetingTimeline(sql, workspaceId, actorUserId, meeting) {
+  const deleted = meeting.sync_status === 'deleted';
+  const message = deleted
+    ? `Removed from Google Calendar: ${meeting.title}`
+    : `Synced to Google Calendar${meeting.meeting_url ? `: ${meeting.meeting_url}` : ''}`;
+  await sql`
+    INSERT INTO activities (
+      workspace_id, user_id, lead_id, type, subject, description, message, due_at,
+      completed_at, priority, owner_user_id, outcome, created_by, timestamp,
+      created_at, updated_at, source_type, source_id
+    ) VALUES (
+      ${workspaceId}, ${meeting.user_id || actorUserId}, ${meeting.lead_id}, 'meeting',
+      ${meeting.title}, ${meeting.notes || message}, ${message}, ${meeting.date_time},
+      ${deleted ? new Date().toISOString() : null}, 'normal', ${meeting.user_id || actorUserId},
+      ${deleted ? 'Deleted from Google Calendar' : 'Synced to Google Calendar'},
+      ${actorUserId}, NOW(), NOW(), NOW(), 'calendar_meeting', ${meeting.id}
+    )
+    ON CONFLICT (workspace_id, source_type, source_id)
+      WHERE source_type IS NOT NULL AND source_id IS NOT NULL
+    DO UPDATE SET
+      lead_id = EXCLUDED.lead_id,
+      subject = EXCLUDED.subject,
+      description = EXCLUDED.description,
+      message = EXCLUDED.message,
+      due_at = EXCLUDED.due_at,
+      completed_at = EXCLUDED.completed_at,
+      outcome = EXCLUDED.outcome,
+      updated_at = NOW()
+  `;
 }

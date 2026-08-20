@@ -1,12 +1,14 @@
 import { getDb } from '../server/db.js';
 import { getQueryInteger, json, withApiRoute } from '../server/http.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET'],
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
     const trendDays = getQueryInteger(req.query, 'trendDays', 7, 1, 365);
 
     const [leadSummaryRows, invoiceSummaryRows, meetingSummaryRows, reminderRows, stageRows, leadTrendRows, revenueTrendRows, dealSummaryRows] = await Promise.all([
@@ -19,7 +21,7 @@ export default withApiRoute({
           COUNT(*) FILTER (WHERE stage = 'closed-won')::int AS closed_won,
           COUNT(*) FILTER (WHERE stage IN ('qualified', 'proposal'))::int AS open_pipeline_leads
         FROM leads
-        WHERE workspace_id = ${workspace.id}
+        WHERE workspace_id = ${workspace.id} AND (${accessAll} OR user_id = ${userId})
       `,
       sql`
         WITH invoice_summary AS (
@@ -30,7 +32,7 @@ export default withApiRoute({
                  COALESCE(SUM(balance_due) FILTER (
                    WHERE currency = ${workspace.base_currency} AND status NOT IN ('paid', 'cancelled', 'void')
                  ), 0)::numeric AS outstanding
-          FROM invoices WHERE workspace_id = ${workspace.id}
+          FROM invoices WHERE workspace_id = ${workspace.id} AND (${accessAll} OR user_id = ${userId})
         ), payment_summary AS (
           SELECT COALESCE(SUM(amount) FILTER (WHERE status = 'settled' AND currency = ${workspace.base_currency}), 0)::numeric AS total_revenue,
                  COALESCE(SUM(amount) FILTER (
@@ -38,32 +40,40 @@ export default withApiRoute({
                      AND payment_date >= date_trunc('month', CURRENT_DATE)::date
                  ), 0)::numeric AS this_month_revenue
           FROM payments WHERE workspace_id = ${workspace.id}
+            AND (${accessAll} OR EXISTS (
+              SELECT 1 FROM invoices scoped_invoice
+              WHERE scoped_invoice.id = payments.invoice_id
+                AND scoped_invoice.workspace_id = payments.workspace_id
+                AND scoped_invoice.user_id = ${userId}
+            ))
         )
         SELECT * FROM invoice_summary CROSS JOIN payment_summary
       `,
       sql`
         SELECT COUNT(*) FILTER (WHERE date_time > NOW())::int AS upcoming
         FROM meetings
-        WHERE workspace_id = ${workspace.id}
+        WHERE workspace_id = ${workspace.id} AND (${accessAll} OR user_id = ${userId})
       `,
       sql`
         SELECT COUNT(*)::int AS overdue
         FROM leads l
         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(l.reminders, '[]'::jsonb)) AS reminder(value)
         WHERE l.workspace_id = ${workspace.id}
+          AND (${accessAll} OR l.user_id = ${userId})
           AND COALESCE((reminder.value->>'completed')::boolean, false) = false
           AND (reminder.value->>'date')::date < CURRENT_DATE
       `,
       sql`
         SELECT stage, COUNT(*)::int AS count
         FROM leads
-        WHERE workspace_id = ${workspace.id}
+        WHERE workspace_id = ${workspace.id} AND (${accessAll} OR user_id = ${userId})
         GROUP BY stage
       `,
       sql`
         SELECT created_at::date AS day, COUNT(*)::int AS leads
         FROM leads
         WHERE workspace_id = ${workspace.id}
+          AND (${accessAll} OR user_id = ${userId})
           AND created_at >= CURRENT_DATE - ${trendDays - 1}::int
           AND created_at < CURRENT_DATE + 1
         GROUP BY created_at::date
@@ -73,6 +83,12 @@ export default withApiRoute({
         SELECT payment_date AS day, COALESCE(SUM(amount), 0)::numeric AS revenue
         FROM payments
         WHERE workspace_id = ${workspace.id} AND status = 'settled'
+          AND (${accessAll} OR EXISTS (
+            SELECT 1 FROM invoices scoped_invoice
+            WHERE scoped_invoice.id = payments.invoice_id
+              AND scoped_invoice.workspace_id = payments.workspace_id
+              AND scoped_invoice.user_id = ${userId}
+          ))
           AND currency = ${workspace.base_currency}
           AND payment_date >= CURRENT_DATE - ${trendDays - 1}::int
           AND payment_date < CURRENT_DATE + 1
@@ -87,6 +103,7 @@ export default withApiRoute({
                COALESCE(SUM(d.amount) FILTER (WHERE d.status = 'lost'), 0) AS closed_lost_amount
         FROM deals d
         WHERE d.workspace_id = ${workspace.id}
+          AND (${accessAll} OR d.owner_user_id = ${userId})
         GROUP BY d.currency
         ORDER BY d.currency
       `,

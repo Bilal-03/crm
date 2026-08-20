@@ -3,6 +3,7 @@ import { createClerkClient } from '@clerk/backend';
 import { getDb } from '../server/db.js';
 import { HttpError, json, withApiRoute } from '../server/http.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { consumeRateLimit } from '../server/rate-limit.js';
 
 const ROLES = ['admin', 'member'];
 
@@ -30,7 +31,12 @@ export default withApiRoute({
     if (body.action === 'accept') return json(res, 200, { data: await acceptInvitation(sql, userId, body.invitationId) });
     requireManager(workspace.role);
 
-    if (body.action === 'invite') return json(res, 201, { data: await createInvitation(sql, workspace.id, userId, body) });
+    if (body.action === 'invite') {
+      await consumeRateLimit(sql, {
+        workspaceId: workspace.id, subject: userId, scope: 'team_invitation', limit: 20, windowSeconds: 3600,
+      });
+      return json(res, 201, { data: await createInvitation(sql, workspace.id, userId, body) });
+    }
     if (body.action === 'rename') return json(res, 200, { data: await renameWorkspace(sql, workspace, body.name) });
     if (body.action === 'settings') return json(res, 200, { data: await updateWorkspaceSettings(sql, workspace, body) });
     if (body.action === 'role') return json(res, 200, { data: await updateRole(sql, workspace, body) });

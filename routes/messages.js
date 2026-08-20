@@ -13,6 +13,8 @@ import {
 } from '../server/http.js';
 import { validateOutboundMessage } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { consumeRateLimit } from '../server/rate-limit.js';
+import { assertCrmTargetAccess, canAccessAllRecords } from '../server/authorization.js';
 
 const TARGETS = [
   ['lead_id', 'leads', 'Lead'],
@@ -26,6 +28,7 @@ export default withApiRoute({
   async handler({ req, res, userId, requestId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const pagination = getPagination(req.query);
@@ -46,6 +49,7 @@ export default withApiRoute({
         LEFT JOIN contacts c ON c.id = m.contact_id AND c.workspace_id = m.workspace_id
         LEFT JOIN deals d ON d.id = m.deal_id AND d.workspace_id = m.workspace_id
         WHERE m.workspace_id = ${workspace.id}
+          AND (${accessAll} OR m.attempted_by = ${userId})
           AND (${status}::text IS NULL OR m.status = ${status})
           AND (${search}::text IS NULL OR m.subject ILIKE ${search ? `%${search}%` : null}
             OR m.recipient ILIKE ${search ? `%${search}%` : null}
@@ -61,12 +65,18 @@ export default withApiRoute({
       return json(res, 200, paginated(result.data.map(mapMessage), pagination, result.total));
     }
 
+    await consumeRateLimit(sql, {
+      workspaceId: workspace.id, subject: userId, scope: 'outbound_email', limit: 30, windowSeconds: 60,
+    });
+
     let input = validateOutboundMessage(req.body);
+    await assertCrmTargetAccess(sql, workspace, userId, input);
     let retry = null;
     if (input.retry_of_id) {
       const retryRows = await sql`
         SELECT * FROM outbound_messages
         WHERE id = ${input.retry_of_id} AND workspace_id = ${workspace.id}
+          AND (${accessAll} OR attempted_by = ${userId})
       `;
       retry = retryRows[0];
       if (!retry) throw new HttpError(404, 'not_found', 'Message to retry was not found.');
@@ -155,13 +165,17 @@ export default withApiRoute({
         INSERT INTO activities (
           workspace_id, user_id, lead_id, account_id, contact_id, deal_id, type,
           subject, description, message, completed_at, priority, owner_user_id,
-          outcome, created_by, timestamp, created_at, updated_at
+          outcome, created_by, timestamp, created_at, updated_at, source_type, source_id
         ) VALUES (
           ${workspace.id}, ${userId}, ${input.lead_id ?? null}, ${input.account_id ?? null},
           ${input.contact_id ?? null}, ${input.deal_id ?? null}, 'email', ${input.subject},
           ${activityMessage}, ${activityMessage}, NOW(), 'normal', ${userId},
-          ${`Sent to ${input.recipient}`}, ${userId}, NOW(), NOW(), NOW()
+          ${`Sent to ${input.recipient}`}, ${userId}, NOW(), NOW(), NOW(),
+          'outbound_message', ${message.id}
         )
+        ON CONFLICT (workspace_id, source_type, source_id)
+          WHERE source_type IS NOT NULL AND source_id IS NOT NULL
+        DO UPDATE SET outcome = EXCLUDED.outcome, updated_at = NOW()
       `;
     } catch (timelineError) {
       console.error(JSON.stringify({

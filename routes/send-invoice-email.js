@@ -5,6 +5,7 @@ import { getDb } from '../server/db.js';
 import { financialAuditQuery } from '../server/financial-records.js';
 import { getRequiredId, HttpError, json, withApiRoute } from '../server/http.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { canAccessAllRecords } from '../server/authorization.js';
 
 const MAX_PDF_BYTES = 3 * 1024 * 1024;
 
@@ -20,12 +21,14 @@ export default withApiRoute({
     const pdf = decodePdf(req.body?.pdfBase64);
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
     const rows = await sql`
       SELECT i.id, i.invoice_number, i.total_amount, i.balance_due, i.currency,
              i.due_date, i.status, i.sent_at, c.name, c.email
       FROM invoices i
       JOIN customers c ON c.id = i.customer_id AND c.workspace_id = i.workspace_id
       WHERE i.id = ${invoiceId} AND i.workspace_id = ${workspace.id}
+        AND (${accessAll} OR i.user_id = ${userId})
     `;
     const invoice = rows[0];
     if (!invoice) throw new HttpError(404, 'not_found', 'Invoice not found.');

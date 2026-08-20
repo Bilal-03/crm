@@ -26,12 +26,15 @@ import {
 } from '../server/core-model.js';
 import { validateDeal } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { enqueueAutomationEvent, processAutomationJobs } from '../server/automations.js';
+import { assertAssignableOwner, assertCrmTargetAccess, canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const requestedId = getQueryUuid(req.query, 'id');
@@ -71,6 +74,7 @@ export default withApiRoute({
         LEFT JOIN accounts a ON a.id = d.account_id AND a.workspace_id = d.workspace_id
         LEFT JOIN contacts c ON c.id = d.primary_contact_id AND c.workspace_id = d.workspace_id
         WHERE d.workspace_id = ${workspace.id}
+          AND (${accessAll} OR d.owner_user_id = ${userId})
           AND (${requestedId}::uuid IS NULL OR d.id = ${requestedId})
           AND (${search}::text IS NULL OR d.name ILIKE ${search ? `%${search}%` : null}
             OR a.name ILIKE ${search ? `%${search}%` : null}
@@ -96,6 +100,8 @@ export default withApiRoute({
 
     if (req.method === 'POST') {
       const input = validateDeal(req.body);
+      await assertCrmTargetAccess(sql, workspace, userId, input);
+      assertAssignableOwner(workspace, userId, input.owner_user_id);
       const ownerUserId = await resolveOwnerUser(sql, workspace.id, userId, input.owner_user_id);
       const { account, contact } = await assertDealReferences(sql, workspace.id, input.account_id, input.primary_contact_id, userId);
       const pipelineStage = await resolvePipelineStage(sql, workspace.id, input.pipeline_id, input.stage_id);
@@ -116,8 +122,10 @@ export default withApiRoute({
         )
         RETURNING id
       `;
-      await recordStageChange(sql, workspace.id, rows[0].id, pipelineStage.pipeline.id, null, pipelineStage.stage.id, userId);
-      return json(res, 201, { data: await getDealById(sql, workspace.id, rows[0].id) });
+      const stageChange = await recordStageChange(sql, workspace.id, rows[0].id, pipelineStage.pipeline.id, null, pipelineStage.stage.id, userId);
+      const deal = await getDealById(sql, workspace.id, rows[0].id);
+      await enqueueDealEvents(sql, workspace.id, deal, stageChange, null, userId);
+      return json(res, 201, { data: deal });
     }
 
     const id = getRequiredId(req.query);
@@ -126,13 +134,15 @@ export default withApiRoute({
              name, amount, currency, probability, expected_close_date, actual_close_date,
              forecast_category, lead_source, status, lost_reason, next_activity_date
       FROM deals
-      WHERE id = ${id} AND workspace_id = ${workspace.id}
+      WHERE id = ${id} AND workspace_id = ${workspace.id} AND (${accessAll} OR owner_user_id = ${userId})
     `;
     const existing = existingRows[0];
     if (!existing) throw new HttpError(404, 'not_found', 'Deal not found.');
 
     if (req.method === 'PUT') {
       const input = validateDeal(req.body, { partial: true });
+      await assertCrmTargetAccess(sql, workspace, userId, input);
+      assertAssignableOwner(workspace, userId, input.owner_user_id);
       const has = key => Object.prototype.hasOwnProperty.call(input, key);
       const pipelineChanged = has('pipeline_id') && input.pipeline_id !== existing.pipeline_id;
       const stageChangedByInput = has('stage_id');
@@ -184,8 +194,9 @@ export default withApiRoute({
         WHERE id = ${id} AND workspace_id = ${workspace.id}
         RETURNING id
       `;
+      let stageChange = null;
       if (stageChanged) {
-        await recordStageChange(
+        stageChange = await recordStageChange(
           sql,
           workspace.id,
           id,
@@ -195,11 +206,13 @@ export default withApiRoute({
           userId,
         );
       }
-      return json(res, 200, { data: await getDealById(sql, workspace.id, rows[0].id) });
+      const deal = await getDealById(sql, workspace.id, rows[0].id);
+      if (stageChange) await enqueueDealEvents(sql, workspace.id, deal, stageChange, existing.status, userId);
+      return json(res, 200, { data: deal });
     }
 
     const deleted = await sql`
-      DELETE FROM deals WHERE id = ${id} AND workspace_id = ${workspace.id} RETURNING id
+      DELETE FROM deals WHERE id = ${id} AND workspace_id = ${workspace.id} AND (${accessAll} OR owner_user_id = ${userId}) RETURNING id
     `;
     if (!deleted[0]) throw new HttpError(404, 'not_found', 'Deal not found.');
     return noContent(res);
@@ -207,10 +220,47 @@ export default withApiRoute({
 });
 
 async function recordStageChange(sql, workspaceId, dealId, pipelineId, fromStageId, toStageId, userId) {
-  await sql`
+  const rows = await sql`
     INSERT INTO deal_stage_history (
       workspace_id, deal_id, pipeline_id, from_stage_id, to_stage_id, changed_by, changed_at
     )
     VALUES (${workspaceId}, ${dealId}, ${pipelineId}, ${fromStageId}, ${toStageId}, ${userId}, NOW())
+    RETURNING id, changed_at
   `;
+  return rows[0];
+}
+
+async function enqueueDealEvents(sql, workspaceId, deal, stageChange, previousStatus, actorUserId) {
+  const payload = {
+    id: deal.id,
+    name: deal.name,
+    amount: deal.amount,
+    currency: deal.currency,
+    status: deal.status,
+    owner_user_id: deal.owner_user_id,
+    stage_id: deal.stage_id,
+    previous_status: previousStatus,
+    actor_user_id: actorUserId,
+  };
+  await enqueueAutomationEvent(sql, {
+    workspaceId,
+    eventKey: `deal_stage_changed:${stageChange.id}`,
+    triggerType: 'deal_stage_changed',
+    entityType: 'deal',
+    entityId: deal.id,
+    payload,
+    occurredAt: stageChange.changed_at,
+  });
+  if (deal.status === 'won' && previousStatus !== 'won') {
+    await enqueueAutomationEvent(sql, {
+      workspaceId,
+      eventKey: `deal_won:${stageChange.id}`,
+      triggerType: 'deal_won',
+      entityType: 'deal',
+      entityId: deal.id,
+      payload,
+      occurredAt: stageChange.changed_at,
+    });
+  }
+  await processAutomationJobs(sql, { limit: 10, workspaceId });
 }

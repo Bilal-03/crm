@@ -5,7 +5,8 @@ import { financialAuditQuery, getInvoiceDetail, reserveDocumentNumber } from '..
 import { HttpError, json, withApiRoute } from '../../server/http.js';
 import { validateQuoteAction } from '../../server/validation.js';
 import { getActiveWorkspace } from '../../server/workspaces.js';
-import { getQuoteDetail, taxQueries } from '../quotes.js';
+import { assertRecordAccess } from '../../server/authorization.js';
+import { assertQuoteAccess, getQuoteDetail, taxQueries } from '../quotes.js';
 
 const TRANSITIONS = Object.freeze({
   send: { from: ['draft'], status: 'sent', timestamp: 'sent_at' },
@@ -21,6 +22,7 @@ export default withApiRoute({
     const input = validateQuoteAction(req.body);
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    await assertQuoteAccess(sql, workspace, userId, input.quote_id);
     const quote = await getQuoteDetail(sql, workspace.id, input.quote_id);
 
     if (input.action === 'revise') {
@@ -111,6 +113,7 @@ async function convertQuoteToInvoice(sql, workspace, quote, input, userId, reque
   }
   const existing = await sql`SELECT id FROM invoices WHERE quote_id = ${quote.id} AND workspace_id = ${workspace.id}`;
   if (existing[0]) return getInvoiceDetail(sql, workspace.id, existing[0].id);
+  await assertRecordAccess(sql, workspace, userId, 'customers', 'user_id', input.customer_id);
   const customer = await sql`SELECT id FROM customers WHERE id = ${input.customer_id} AND workspace_id = ${workspace.id}`;
   if (!customer[0]) throw new HttpError(400, 'invalid_reference', 'Customer does not exist in this workspace.');
   if (input.due_date < new Date().toISOString().slice(0, 10)) {

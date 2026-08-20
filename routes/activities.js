@@ -16,6 +16,8 @@ import {
 import { resolveOwnerUser } from '../server/core-model.js';
 import { validateActivity } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { notifyAssignment, notifyMentions } from '../server/notifications.js';
+import { assertAssignableOwner, assertCrmTargetAccess, canAccessAllRecords } from '../server/authorization.js';
 
 const ACTIVITY_BUCKETS = ['today', 'overdue', 'upcoming', 'completed', 'all'];
 
@@ -24,6 +26,7 @@ export default withApiRoute({
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const pagination = getPagination(req.query);
@@ -55,6 +58,7 @@ export default withApiRoute({
         LEFT JOIN contacts c ON c.id = a.contact_id AND c.workspace_id = a.workspace_id
         LEFT JOIN deals d ON d.id = a.deal_id AND d.workspace_id = a.workspace_id
         WHERE a.workspace_id = ${workspace.id}
+          AND (${accessAll} OR a.owner_user_id = ${userId})
           AND (${search}::text IS NULL OR a.subject ILIKE ${search ? `%${search}%` : null}
             OR a.description ILIKE ${search ? `%${search}%` : null}
             OR a.message ILIKE ${search ? `%${search}%` : null}
@@ -84,6 +88,8 @@ export default withApiRoute({
 
     if (req.method === 'POST') {
       const input = validateActivity(req.body);
+      await assertCrmTargetAccess(sql, workspace, userId, input);
+      assertAssignableOwner(workspace, userId, input.owner_user_id);
       await assertActivityReferences(sql, workspace.id, input);
       const ownerUserId = await resolveOwnerUser(sql, workspace.id, userId, input.owner_user_id);
       const subject = input.subject || input.message || input.type;
@@ -105,18 +111,33 @@ export default withApiRoute({
         )
         RETURNING *
       `;
+      await Promise.all([
+        notifyAssignment(sql, {
+          workspaceId: workspace.id, actorUserId: userId, recipientUserId: ownerUserId,
+          resource: 'activities', entityId: rows[0].id,
+          title: `Activity assigned: ${subject}`,
+        }),
+        notifyMentions(sql, {
+          workspaceId: workspace.id, actorUserId: userId,
+          text: `${description || ''}\n${message || ''}`,
+          entityType: 'activity', entityId: rows[0].id, actionUrl: '/my-day',
+        }),
+      ]);
       return json(res, 201, { data: mapActivityRow(rows[0]) });
     }
 
     const id = getRequiredId(req.query);
     const existingRows = await sql`
       SELECT * FROM activities WHERE id = ${id} AND workspace_id = ${workspace.id}
+        AND (${accessAll} OR owner_user_id = ${userId})
     `;
     const existing = existingRows[0];
     if (!existing) throw new HttpError(404, 'not_found', 'Activity not found.');
 
     if (req.method === 'PUT') {
       const input = validateActivity(req.body, { partial: true });
+      await assertCrmTargetAccess(sql, workspace, userId, input);
+      assertAssignableOwner(workspace, userId, input.owner_user_id);
       await assertActivityReferences(sql, workspace.id, input);
       const has = key => Object.prototype.hasOwnProperty.call(input, key);
       const ownerUserId = has('owner_user_id')
@@ -154,6 +175,22 @@ export default withApiRoute({
         WHERE id = ${id} AND workspace_id = ${workspace.id}
         RETURNING *
       `;
+      await Promise.all([
+        ownerUserId !== existing.owner_user_id
+          ? notifyAssignment(sql, {
+              workspaceId: workspace.id, actorUserId: userId, recipientUserId: ownerUserId,
+              resource: 'activities', entityId: rows[0].id,
+              title: `Activity assigned: ${subject}`,
+            })
+          : null,
+        (has('description') || has('message'))
+          ? notifyMentions(sql, {
+              workspaceId: workspace.id, actorUserId: userId,
+              text: `${description || ''}\n${message || ''}`,
+              entityType: 'activity', entityId: rows[0].id, actionUrl: '/my-day',
+            })
+          : null,
+      ]);
       return json(res, 200, { data: mapActivityRow(rows[0]) });
     }
 

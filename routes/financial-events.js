@@ -1,12 +1,14 @@
 import { getDb } from '../server/db.js';
 import { getPagination, getQueryEnum, getQueryUuid, json, paginated, stripTotalCount, withApiRoute } from '../server/http.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { requireFinancialManager } from '../server/financial-records.js';
 
 export default withApiRoute({
   methods: ['GET'],
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    requireFinancialManager(workspace);
     const pagination = getPagination(req.query);
     const entityType = getQueryEnum(req.query, 'entity_type', ['quote', 'invoice', 'payment', 'credit_note', 'financial_settings']);
     const entityId = getQueryUuid(req.query, 'entity_id');

@@ -20,17 +20,21 @@ import {
 } from '../server/http.js';
 import { calculateInvoiceTotals, INVOICE_STATUSES, validateInvoice } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
-import { taxQueries } from './quotes.js';
+import { assertCrmTargetAccess, canAccessAllRecords } from '../server/authorization.js';
+import { assertQuoteAccess, taxQueries } from './quotes.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   async handler({ req, res, userId, requestId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       if (req.query?.id) {
-        return json(res, 200, { data: await getInvoiceDetail(sql, workspace.id, getRequiredId(req.query)) });
+        const requestedId = getRequiredId(req.query);
+        await assertInvoiceAccess(sql, workspace.id, requestedId, userId, accessAll);
+        return json(res, 200, { data: await getInvoiceDetail(sql, workspace.id, requestedId) });
       }
       const pagination = getPagination(req.query);
       const search = getQueryString(req.query, 'search');
@@ -67,6 +71,7 @@ export default withApiRoute({
           LEFT JOIN deals d ON d.id = i.deal_id AND d.workspace_id = i.workspace_id
           LEFT JOIN quotes q ON q.id = i.quote_id AND q.workspace_id = i.workspace_id
           WHERE i.workspace_id = ${workspace.id}
+            AND (${accessAll} OR i.user_id = ${userId})
             AND (${search}::text IS NULL OR i.invoice_number ILIKE ${search ? `%${search}%` : null} OR c.name ILIKE ${search ? `%${search}%` : null} OR c.company ILIKE ${search ? `%${search}%` : null})
             AND (${ownerUserId}::text IS NULL OR i.user_id = ${ownerUserId})
             AND (${dealId}::uuid IS NULL OR i.deal_id = ${dealId})
@@ -85,6 +90,8 @@ export default withApiRoute({
 
     if (req.method === 'POST') {
       const input = validateInvoice(req.body, { allowAmountPaid: false });
+      await assertCrmTargetAccess(sql, workspace, userId, input);
+      if (input.quote_id) await assertQuoteAccess(sql, workspace, userId, input.quote_id);
       await assertInvoiceReferences(sql, workspace.id, input);
       if (input.due_date < input.invoice_date) throw invalidDueDate();
       const invoiceId = randomUUID();
@@ -128,6 +135,7 @@ export default withApiRoute({
     }
 
     const id = getRequiredId(req.query);
+    await assertInvoiceAccess(sql, workspace.id, id, userId, accessAll);
     const existing = await getInvoiceDetail(sql, workspace.id, id);
 
     if (req.method === 'PUT') {
@@ -147,6 +155,8 @@ export default withApiRoute({
         items: updates.items || existing.items,
         tax_components: updates.tax_components || existing.tax_components,
       };
+      await assertCrmTargetAccess(sql, workspace, userId, merged);
+      if (merged.quote_id) await assertQuoteAccess(sql, workspace, userId, merged.quote_id);
       if (merged.due_date < merged.invoice_date) throw invalidDueDate();
       await assertInvoiceReferences(sql, workspace.id, merged);
       const totals = calculateDocumentTotals({
@@ -219,6 +229,14 @@ export function isInvoiceDeletable(invoice, paymentCount = 0, deliveryCount = 0)
     && Number(paymentCount) === 0
     && Number(deliveryCount) === 0
     && !invoice.sent_at;
+}
+
+async function assertInvoiceAccess(sql, workspaceId, invoiceId, userId, accessAll) {
+  if (accessAll) return;
+  const rows = await sql`
+    SELECT id FROM invoices WHERE id = ${invoiceId} AND workspace_id = ${workspaceId} AND user_id = ${userId}
+  `;
+  if (!rows[0]) throw new HttpError(403, 'record_access_denied', 'Your role can access only invoices assigned to you.');
 }
 
 async function assertInvoiceReferences(sql, workspaceId, input) {

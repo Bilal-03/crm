@@ -42,6 +42,10 @@ export default withApiRoute({
       return json(res, 200, paginated(pipelines, pagination, Number(rows[0]?.__total_count ?? 0)));
     }
 
+    if (!['owner', 'admin'].includes(workspace.role)) {
+      throw new HttpError(403, 'manager_required', 'Only workspace managers can change pipelines.');
+    }
+
     if (req.method === 'POST') {
       const input = validatePipeline(req.body);
       const stages = parseStages(req.body?.stages, false);

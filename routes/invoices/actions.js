@@ -11,6 +11,7 @@ import {
 import { HttpError, json, withApiRoute } from '../../server/http.js';
 import { validateInvoiceAction } from '../../server/validation.js';
 import { getActiveWorkspace } from '../../server/workspaces.js';
+import { assertRecordAccess } from '../../server/authorization.js';
 
 export default withApiRoute({
   methods: ['POST'],
@@ -18,6 +19,7 @@ export default withApiRoute({
     const input = validateInvoiceAction(req.body);
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    await assertRecordAccess(sql, workspace, userId, 'invoices', 'user_id', input.invoice_id);
     const invoice = await getInvoiceDetail(sql, workspace.id, input.invoice_id);
 
     if (input.action === 'cancel') {

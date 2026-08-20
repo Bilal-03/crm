@@ -16,12 +16,14 @@ import { getAccountInWorkspace, resolveOwnerUser } from '../server/core-model.js
 import { normalizeDomain, normalizeName, normalizePhone } from '../server/normalization.js';
 import { validateAccount } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { assertAssignableOwner, assertOwnerAccess, canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   async handler({ req, res, userId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       const pagination = getPagination(req.query);
@@ -49,6 +51,7 @@ export default withApiRoute({
         LEFT JOIN contacts c ON c.account_id = a.id AND c.workspace_id = a.workspace_id
         LEFT JOIN deals d ON d.account_id = a.id AND d.workspace_id = a.workspace_id
         WHERE a.workspace_id = ${workspace.id}
+          AND (${accessAll} OR a.owner_user_id = ${userId})
           AND (${search}::text IS NULL OR a.name ILIKE ${search ? `%${search}%` : null}
             OR a.domain ILIKE ${search ? `%${search}%` : null}
             OR a.phone ILIKE ${search ? `%${search}%` : null}
@@ -64,6 +67,7 @@ export default withApiRoute({
 
     if (req.method === 'POST') {
       const input = validateAccount(req.body);
+      assertAssignableOwner(workspace, userId, input.owner_user_id);
       const ownerUserId = await resolveOwnerUser(sql, workspace.id, userId, input.owner_user_id);
       const rows = await sql`
         INSERT INTO accounts (
@@ -84,9 +88,11 @@ export default withApiRoute({
     const id = getRequiredId(req.query);
     const existing = await getAccountInWorkspace(sql, workspace.id, id);
     if (!existing) throw new HttpError(404, 'not_found', 'Account not found.');
+    assertOwnerAccess(workspace, userId, existing.owner_user_id);
 
     if (req.method === 'PUT') {
       const input = validateAccount(req.body, { partial: true });
+      assertAssignableOwner(workspace, userId, input.owner_user_id);
       const has = key => Object.prototype.hasOwnProperty.call(input, key);
       const ownerUserId = has('owner_user_id')
         ? await resolveOwnerUser(sql, workspace.id, userId, input.owner_user_id)

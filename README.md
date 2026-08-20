@@ -16,6 +16,7 @@ CRM Pro is a full-stack React application designed for small teams that need one
 | Revenue | Versioned quotes, protected invoice lifecycle, payments, credit notes, multi-currency PDFs, delivery history, and audit events |
 | Reporting | Currency-safe forecasts, goals/quotas, pacing, forecast-versus-target, deal outcomes, stage conversion/aging, owner/source performance, and filtered CSV exports |
 | Communications | Internal email compose, reusable templates, idempotent delivery/retry history, CRM timeline logging, and failure notifications |
+| Automations | Trigger-condition-action workflows, idempotent jobs, retry backoff, dead-letter recovery, and audited manager controls |
 | Authentication | Clerk sign-in with tenant-scoped data access |
 | Notifications | In-app success and error feedback for important actions |
 
@@ -54,7 +55,7 @@ CRM Pro is a full-stack React application designed for small teams that need one
 Invoice email: API → Resend
 ```
 
-The API derives the authenticated user from the verified Clerk token. The browser never supplies its own `user_id`, and all database queries are scoped to the caller's personal workspace. Every account receives a personal workspace automatically, while `workspace_members` provides the foundation for future owner, admin, and member access. Relationship writes verify that records belong to the active workspace before creating meetings or invoices.
+The API derives the authenticated user from the verified Clerk token. The browser never supplies its own `user_id`, and all database queries are scoped to the active workspace. Owners and admins can access workspace-wide records; members are restricted to records assigned to them. Relationship writes verify both workspace membership and record access before creating linked data.
 
 ## Repository layout
 
@@ -121,6 +122,9 @@ psql "$NEON_DATABASE_URL" -f migrations/008_phase5_quote_to_cash.sql
 psql "$NEON_DATABASE_URL" -f migrations/009_phase7_communications.sql
 psql "$NEON_DATABASE_URL" -f migrations/010_phase6_goals_quotas.sql
 psql "$NEON_DATABASE_URL" -f migrations/011_phase7_google_calendar.sql
+psql "$NEON_DATABASE_URL" -f migrations/012_phase7_completion.sql
+psql "$NEON_DATABASE_URL" -f migrations/013_phase8_automation.sql
+psql "$NEON_DATABASE_URL" -f migrations/014_phase8_security.sql
 ```
 
 `schema.sql` is the canonical fresh-database schema and includes the latest team-invitation, reporting, CRM core, productivity, quote-to-cash, and Phase 7 communication structures. The `schema_migrations` table records the reviewed migration versions. Never skip a migration on an existing database.
@@ -196,6 +200,7 @@ Open the local Vite URL shown in the terminal, normally `http://localhost:5173`.
 | `CLERK_AUTHORIZED_PARTIES` | Yes in production | Exact allowed frontend origin(s) |
 | `NEON_DATABASE_URL` | Yes | PostgreSQL connection string |
 | `RESEND_API_KEY` | Optional | Enables Resend-backed CRM and invoice email delivery |
+| `RESEND_WEBHOOK_SECRET` | Required for delivery tracking | Verifies Resend delivery/bounce webhook signatures |
 | `INVOICE_FROM_EMAIL` | Optional | Verified sender for invoice emails |
 | `CRM_EMAIL_PROVIDER` | Optional | Provider-neutral CRM email adapter selection; currently `resend` |
 | `CRM_FROM_EMAIL` | Required for CRM email | Verified sender for internal CRM compose; falls back to `INVOICE_FROM_EMAIL` |
@@ -204,6 +209,7 @@ Open the local Vite URL shown in the terminal, normally `http://localhost:5173`.
 | `GOOGLE_CLIENT_SECRET` | Required for Calendar | Server-only Google OAuth client secret |
 | `GOOGLE_OAUTH_REDIRECT_URI` | Required for Calendar | Exact callback registered in Google Cloud, ending in `/api/integrations/google-calendar/callback` |
 | `INTEGRATION_TOKEN_ENCRYPTION_KEY` | Required for Calendar | Base64-encoded 32-byte key used for authenticated token encryption |
+| `CRON_SECRET` | Required for automations | Bearer secret used by the Vercel automation cron |
 
 Use `.env.example` as the canonical variable list. Keep `.env`, `.env.local`, and production secret values out of Git.
 
@@ -217,6 +223,7 @@ npm run build     # Create the optimized production bundle
 npm run preview   # Preview the production bundle locally
 npm run lint      # Parse-check server, API, test, and utility JavaScript files
 npm run test      # Run unit and API contract tests
+npm run test:e2e  # Run deployed authenticated smoke checks when E2E variables are set
 npm run check     # Run lint, tests, and the production build verification
 npm run smoke:fresh-db # Verify the required Phase 2 schema on an isolated database
 ```
@@ -258,6 +265,9 @@ npm run smoke:fresh-db # Verify the required Phase 2 schema on an isolated datab
 | `/api/email-templates` | GET, POST, PUT, DELETE | Shared workspace email templates with archive-safe lifecycle |
 | `/api/communication-status` | GET | Non-secret provider configuration and connection health |
 | `/api/notifications` | GET, PUT | Current-user notification feed and read/dismiss actions |
+| `/api/automations` | GET, POST, PUT, DELETE | Manager-controlled workflow rules, job visibility, manual runs, and dead-letter retry |
+| `/api/automation-worker` | GET, POST | Cron-secret protected scheduled-event scan and job worker |
+| `/api/webhooks/resend` | POST | Signature-verified provider delivery-state callbacks |
 | `/api/integrations/google-calendar/connect` | POST | Starts state-bound Google OAuth authorization |
 | `/api/integrations/google-calendar/callback` | GET | Consumes the one-time OAuth callback and stores encrypted credentials |
 | `/api/integrations/google-calendar/disconnect` | POST | Revokes access and removes local credentials |
@@ -306,7 +316,7 @@ The project is configured for Vercel deployment.
 3. Add every variable from `.env.example` to the Vercel project settings.
 4. Set `CLERK_AUTHORIZED_PARTIES` to the exact production origin.
 5. Apply `schema.sql` for a new database, or apply every reviewed migration in order before deploying API changes.
-6. Configure production Clerk keys and the exact authorized party for the production origin; verify no Clerk development-mode warning appears.
+6. Configure Clerk for the intended deployment mode. This project is deliberately remaining in development mode for the current rollout, so retain the existing test keys and `development` mode variables; the browser warning is expected. Before handling production customer data, replace them with live keys and complete the production-domain setup.
 7. Configure a verified Resend sender if invoice email is enabled.
 8. Run `npm run smoke:fresh-db` against a dedicated database and verify sign-in, one CRUD flow per resource, tenant isolation, PDF generation, dashboard totals, report totals, and invoice delivery.
 

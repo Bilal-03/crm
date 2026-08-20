@@ -2,6 +2,7 @@ import { getDb } from '../../server/db.js';
 import { getQueryDate, getQueryEnum, getQueryInteger, getQueryString, getQueryUuid, HttpError, json, withApiRoute } from '../../server/http.js';
 import { getExplicitReportWindow, getReportWindow } from '../../server/reporting.js';
 import { getActiveWorkspace } from '../../server/workspaces.js';
+import { canAccessAllRecords } from '../../server/authorization.js';
 
 const EXPORT_LIMIT = 10_000;
 
@@ -14,7 +15,7 @@ export default withApiRoute({
     const currency = (getQueryString(req.query, 'currency', 3) || workspace.base_currency).toUpperCase();
     if (!/^[A-Z]{3}$/.test(currency)) throw new HttpError(400, 'invalid_query', 'currency must be an ISO 4217 three-letter code.');
     const owner = getQueryString(req.query, 'owner', 256);
-    const ownerUserId = owner === 'me' ? userId : owner;
+    const ownerUserId = canAccessAllRecords(workspace) ? (owner === 'me' ? userId : owner) : userId;
     const pipelineId = getQueryUuid(req.query, 'pipeline_id');
     const source = getQueryString(req.query, 'source', 80);
     const recordType = getQueryEnum(req.query, 'record_type', ['all', 'deal', 'payment', 'activity']) || 'all';

@@ -18,16 +18,20 @@ import {
 } from '../server/http.js';
 import { QUOTE_STATUSES, validateQuote } from '../server/validation.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
+import { assertRecordAccess, canAccessAllRecords } from '../server/authorization.js';
 
 export default withApiRoute({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   async handler({ req, res, userId, requestId }) {
     const sql = getDb();
     const workspace = await getActiveWorkspace(sql, userId, req.headers['x-workspace-id']);
+    const accessAll = canAccessAllRecords(workspace);
 
     if (req.method === 'GET') {
       if (req.query?.id) {
-        return json(res, 200, { data: await getQuoteDetail(sql, workspace.id, getRequiredId(req.query)) });
+        const requestedId = getRequiredId(req.query);
+        await assertQuoteAccess(sql, workspace, userId, requestedId);
+        return json(res, 200, { data: await getQuoteDetail(sql, workspace.id, requestedId) });
       }
       const pagination = getPagination(req.query);
       const search = getQueryString(req.query, 'search');
@@ -46,6 +50,7 @@ export default withApiRoute({
         LEFT JOIN accounts a ON a.id = q.account_id AND a.workspace_id = q.workspace_id
         LEFT JOIN contacts c ON c.id = q.contact_id AND c.workspace_id = q.workspace_id
         WHERE q.workspace_id = ${workspace.id}
+          AND (${accessAll} OR q.created_by = ${userId} OR d.owner_user_id = ${userId})
           AND (${search}::text IS NULL OR q.quote_number ILIKE ${search ? `%${search}%` : null} OR d.name ILIKE ${search ? `%${search}%` : null} OR a.name ILIKE ${search ? `%${search}%` : null} OR c.name ILIKE ${search ? `%${search}%` : null})
           AND (${status}::text IS NULL OR q.status = ${status})
           AND (${dealId}::uuid IS NULL OR q.deal_id = ${dealId})
@@ -60,7 +65,9 @@ export default withApiRoute({
     if (req.method === 'POST') {
       const input = validateQuote(req.body);
       if (!input.deal_id) throw new HttpError(400, 'invalid_reference', 'A quote must be linked to a deal.');
-      const deal = await getQuoteDeal(sql, workspace.id, input.deal_id);
+      const deal = await getQuoteDeal(sql, workspace, userId, input.deal_id);
+      if (input.account_id) await assertRecordAccess(sql, workspace, userId, 'accounts', 'owner_user_id', input.account_id);
+      if (input.contact_id) await assertRecordAccess(sql, workspace, userId, 'contacts', 'owner_user_id', input.contact_id);
       const quoteId = randomUUID();
       const quoteNumber = await reserveDocumentNumber(sql, workspace.id, 'quote');
       const totals = calculateDocumentTotals({
@@ -104,6 +111,7 @@ export default withApiRoute({
     }
 
     const quoteId = getRequiredId(req.query);
+    await assertQuoteAccess(sql, workspace, userId, quoteId);
     const existing = await getQuoteDetail(sql, workspace.id, quoteId);
     if (req.method === 'PUT') {
       if (existing.status !== 'draft' || existing.sent_at) {
@@ -119,7 +127,9 @@ export default withApiRoute({
       if (merged.expiry_date && merged.expiry_date < merged.issue_date) {
         throw new HttpError(400, 'validation_error', 'Request validation failed.', [{ field: 'expiry_date', message: 'must be on or after issue_date' }]);
       }
-      if (input.deal_id) await getQuoteDeal(sql, workspace.id, input.deal_id);
+      if (input.deal_id) await getQuoteDeal(sql, workspace, userId, input.deal_id);
+      if (input.account_id) await assertRecordAccess(sql, workspace, userId, 'accounts', 'owner_user_id', input.account_id);
+      if (input.contact_id) await assertRecordAccess(sql, workspace, userId, 'contacts', 'owner_user_id', input.contact_id);
       const totals = calculateDocumentTotals({
         items: merged.items,
         discountType: merged.discount_type,
@@ -233,13 +243,25 @@ export function taxQueries(sql, workspaceId, targetColumn, targetId, components)
   `);
 }
 
-async function getQuoteDeal(sql, workspaceId, dealId) {
+async function getQuoteDeal(sql, workspace, userId, dealId) {
   const rows = await sql`
     SELECT id, account_id, primary_contact_id, currency
-    FROM deals WHERE id = ${dealId} AND workspace_id = ${workspaceId}
+    FROM deals WHERE id = ${dealId} AND workspace_id = ${workspace.id}
+      AND (${canAccessAllRecords(workspace)} OR owner_user_id = ${userId})
   `;
-  if (!rows[0]) throw new HttpError(400, 'invalid_reference', 'Deal does not exist in this workspace.');
+  if (!rows[0]) throw new HttpError(403, 'record_access_denied', 'Deal is not available to your role.');
   return rows[0];
+}
+
+export async function assertQuoteAccess(sql, workspace, userId, quoteId) {
+  if (canAccessAllRecords(workspace)) return;
+  const rows = await sql`
+    SELECT q.id FROM quotes q
+    LEFT JOIN deals d ON d.id = q.deal_id AND d.workspace_id = q.workspace_id
+    WHERE q.id = ${quoteId} AND q.workspace_id = ${workspace.id}
+      AND (q.created_by = ${userId} OR d.owner_user_id = ${userId})
+  `;
+  if (!rows[0]) throw new HttpError(403, 'record_access_denied', 'Quote is not available to your role.');
 }
 
 function quoteAuditState(quote) {
