@@ -29,8 +29,8 @@ if (typeof document !== 'undefined') {
     body {
       font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       overflow-x: hidden;
-      background-color: #f9fafb; /* Light background */
-      color: #111827; /* Dark text */
+      background-color: var(--crm-page);
+      color: var(--crm-text);
     }
 
     @media (hover: hover) {
@@ -65,6 +65,8 @@ import { useAuth, useClerk, useUser, SignIn } from '@clerk/clerk-react';
 import { createApiClient, fetchAllPages } from './src/lib/api-client.js';
 import { pageFromPathname, pathForPage } from './src/app/routes.js';
 import { AppShell } from './src/components/layout/AppShell.jsx';
+import BrandLogo from './src/components/brand/BrandLogo.jsx';
+import { BRAND_RGB, PRODUCT_BRAND } from './brand.js';
 import { ConfirmDialog } from './src/components/ui/ConfirmDialog.jsx';
 import { EmptyState } from './src/components/ui/EmptyState.jsx';
 import SalesWorkspace from './src/features/sales/SalesWorkspace.jsx';
@@ -230,9 +232,9 @@ const generateQuotePDF = async (lead) => {
   const doc = new jsPDF();
   
   // -- CONFIGURATION --
-  const companyName = "CRM Pro Inc.";
-  const companyAddress = ["123 Business Ave, Suite 100", "Tech City, TC 90210", "support@crmpro.com"];
-  const brandColor = [99, 102, 241]; // Your theme color #6366F1
+  const companyName = PRODUCT_BRAND.name;
+  const companyAddress = [PRODUCT_BRAND.tagline];
+  const brandColor = BRAND_RGB.primary;
   
   // -- HEADER SECTION --
   doc.setFont("helvetica", "bold");
@@ -358,8 +360,8 @@ const generateQuotePDF = async (lead) => {
   doc.setTextColor(100);
   const terms = [
     "1. Payment is due within 14 days of invoice date.",
-    "2. Please make checks payable to CRM Pro Inc.",
-    "3. Questions? Contact support@crmpro.com"
+    `2. Please make checks payable to ${PRODUCT_BRAND.name}.`,
+    `3. Questions? Contact your workspace billing email.`
   ];
   let termY = pageHeight - 35;
   terms.forEach(term => {
@@ -1585,27 +1587,14 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
     <motion.aside
       initial={false}
       animate={{ width: open ? 280 : 80, x: mobile && !open ? -300 : 0 }}
-      className="fixed inset-y-0 left-0 z-40 flex flex-col border-r border-gray-200 bg-white shadow-xl lg:relative lg:z-10 lg:shadow-none"
+      className="crm-sidebar fixed inset-y-0 left-0 z-40 flex flex-col border-r border-gray-200 shadow-xl lg:relative lg:z-10 lg:shadow-none"
     >
-      <div className="p-6 border-b border-gray-200">
+      <div className="border-b border-white/10 p-5">
         <motion.div 
           className="flex items-center gap-3"
           animate={{ justifyContent: open ? 'flex-start' : 'center' }}
         >
-          <div className="w-10 h-10 bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] rounded-xl flex items-center justify-center flex-shrink-0">
-            <Target className="w-6 h-6 text-white" />
-          </div>
-          {open && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <h1 className="text-xl font-bold bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] bg-clip-text text-transparent">
-                CRM Pro
-              </h1>
-            </motion.div>
-          )}
+          <BrandLogo variant="lockup" size="md" showWordmark={open} showTagline={open} inverse className={open ? '' : 'justify-center'} />
         </motion.div>
       </div>
 
@@ -1630,10 +1619,10 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
                   aria-current={currentPage === item.id ? 'page' : undefined}
                   aria-label={open ? undefined : item.label}
                   title={open ? undefined : item.label}
-                  className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 font-medium transition-all ${
+                  className={`crm-nav-item ${
                     currentPage === item.id
-                      ? 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white shadow-lg shadow-[#6366F1]/30'
-                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                      ? 'crm-nav-item-active'
+                      : ''
                   }`}
                 >
                   <item.icon className="h-5 w-5 flex-shrink-0" />
@@ -1650,7 +1639,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
           type="button"
           onClick={() => onNavigate('team')}
           aria-current={currentPage === 'team' ? 'page' : undefined}
-          className={`mb-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 font-medium transition-all ${currentPage === 'team' ? 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white shadow-lg shadow-[#6366F1]/30' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+          className={`crm-nav-item mb-2 ${currentPage === 'team' ? 'crm-nav-item-active' : ''}`}
         >
           <Settings className="h-5 w-5 shrink-0" />
           {open && <span>Team Settings</span>}
@@ -1659,7 +1648,7 @@ function Sidebar({ open, mobile, currentPage, onNavigate, onSignOut, workspaces,
           onClick={onSignOut}
           aria-label={open ? undefined : 'Sign out'}
           title={open ? undefined : 'Sign out'}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all"
+          className="crm-nav-item"
         >
           <LogOut className="w-5 h-5 flex-shrink-0" />
           {open && <span>Sign Out</span>}
@@ -1679,7 +1668,7 @@ function Header({ user, request, onToggleSidebar, overdueCount, workspaceName, w
   }, [query, onGlobalSearch]);
 
   return (
-    <header className="bg-white/50 backdrop-blur-xl border-b border-gray-200 px-4 py-3 md:px-8 md:py-4">
+    <header className="crm-header border-b border-gray-200 px-4 py-3 backdrop-blur-xl md:px-8 md:py-4">
       <div className="flex items-center justify-between">
         <button
           onClick={onToggleSidebar}
@@ -1690,6 +1679,7 @@ function Header({ user, request, onToggleSidebar, overdueCount, workspaceName, w
         >
           <Menu className="w-6 h-6 text-gray-700" />
         </button>
+        <BrandLogo variant="mark" size="sm" showWordmark={false} className="ml-1 mr-auto md:hidden" />
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
           {workspaces.length > 0 && (
@@ -1725,7 +1715,7 @@ function Header({ user, request, onToggleSidebar, overdueCount, workspaceName, w
                 {user.primaryEmailAddress?.emailAddress || ''}
               </p>
             </div>
-            <div className="w-10 h-10 bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] rounded-full flex items-center justify-center">
+            <div className="crm-brand-avatar flex h-10 w-10 items-center justify-center rounded-full">
               <User className="w-5 h-5 text-white" />
             </div>
           </div>
@@ -1790,7 +1780,7 @@ function MobileBottomNav({ currentPage, onNavigate, onOpenMenu }) {
             type="button"
             onClick={() => onNavigate(id)}
             aria-current={active ? 'page' : undefined}
-            className={`mobile-nav-item touch-manipulation flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${active ? 'bg-indigo-50 text-[#6366F1]' : 'text-gray-500'}`}
+            className={`mobile-nav-item touch-manipulation flex min-h-12 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-xs font-semibold transition-colors ${active ? 'crm-mobile-nav-item-active' : 'text-gray-500'}`}
           >
             <Icon className="h-5 w-5" aria-hidden="true" />
             {label}
@@ -1943,7 +1933,7 @@ function Dashboard({ stats, summary, trendRange = '7', onTrendRangeChange, activ
       className="space-y-6"
     >
       {/* Hero Section with Welcome Banner */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-[#6366F1] via-[#8B5CF6] to-[#EC4899] rounded-3xl p-8 text-white shadow-2xl">
+      <div className="crm-dashboard-hero relative overflow-hidden rounded-3xl p-8 text-white shadow-2xl">
         {/* Background Pattern */}
         <div className="absolute inset-0 opacity-10">
           <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
@@ -1972,14 +1962,14 @@ function Dashboard({ stats, summary, trendRange = '7', onTrendRangeChange, activ
               </div>
               <div>
                 <h1 className="text-3xl font-bold">Welcome back! 👋</h1>
-                <p className="text-white/80 text-sm mt-1">Here's what's happening with your business today</p>
+                <p className="text-white/80 text-sm mt-1">{PRODUCT_BRAND.tagline} — here's what's happening with your business today.</p>
               </div>
             </div>
           </div>
           
           <button
             onClick={onAddLead}
-            className="flex items-center gap-2 px-6 py-3 bg-white text-[#6366F1] rounded-xl font-semibold hover:shadow-2xl hover:scale-105 transition-all"
+            className="crm-btn crm-btn-primary bg-white px-6 py-3 text-[var(--crm-primary)] hover:scale-105 hover:bg-white"
           >
             <Plus className="w-5 h-5" />
             Add New Lead
@@ -1992,11 +1982,11 @@ function Dashboard({ stats, summary, trendRange = '7', onTrendRangeChange, activ
         <section className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="getting-started-title">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-semibold text-[#6366F1]">GETTING STARTED</p>
+              <p className="text-sm font-semibold text-[var(--crm-primary)]">GETTING STARTED</p>
               <h2 id="getting-started-title" className="mt-1 text-xl font-bold text-gray-900">Build your first sales workflow</h2>
               <p className="mt-2 max-w-2xl text-sm text-gray-600">Start with a lead, move it through the pipeline, then schedule the next conversation when it matters.</p>
             </div>
-            <button type="button" onClick={onAddLead} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#6366F1] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#5558d9] focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:ring-offset-2">
+            <button type="button" onClick={onAddLead} className="crm-btn crm-btn-primary min-h-11 px-4 py-2.5 focus:ring-2 focus:ring-[var(--crm-focus)] focus:ring-offset-2">
               <Plus className="h-4 w-4" aria-hidden="true" />
               Add your first lead
             </button>
@@ -2008,7 +1998,7 @@ function Dashboard({ stats, summary, trendRange = '7', onTrendRangeChange, activ
               ['3', 'Schedule follow-up', 'Create a meeting or reminder.'],
             ].map(([number, title, description]) => (
               <li key={number} className="flex gap-3 rounded-xl bg-gray-50 p-4">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-[#6366F1]">{number}</span>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-teal-50 text-sm font-bold text-[var(--crm-primary)]">{number}</span>
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
                   <p className="mt-1 text-xs leading-5 text-gray-600">{description}</p>
@@ -2017,7 +2007,7 @@ function Dashboard({ stats, summary, trendRange = '7', onTrendRangeChange, activ
             ))}
           </ol>
           <div className="mt-4 flex justify-end">
-            <button type="button" onClick={() => onNavigate('pipeline')} className="text-sm font-semibold text-[#6366F1] hover:text-[#4f46e5]">Explore the pipeline →</button>
+            <button type="button" onClick={() => onNavigate('pipeline')} className="text-sm font-semibold text-[var(--crm-primary)] hover:text-[var(--crm-brand-dark)]">Explore the pipeline →</button>
           </div>
         </section>
       )}
@@ -4231,7 +4221,7 @@ async function generateInvoicePDF(invoice, customer) {
   const { jsPDF, autoTable } = await loadPdfLibraries();
   const doc = new jsPDF();
   
-  const brandColor = [99, 102, 241];
+  const brandColor = BRAND_RGB.primary;
   
   doc.setFont("helvetica", "bold");
   doc.setFontSize(28);
@@ -4241,9 +4231,8 @@ async function generateInvoicePDF(invoice, customer) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(100);
-  doc.text("CRM Pro Inc.", 14, 35);
-  doc.text("123 Business Ave, Suite 100", 14, 40);
-  doc.text("support@crmpro.com", 14, 45);
+  doc.text(PRODUCT_BRAND.name, 14, 35);
+  doc.text(PRODUCT_BRAND.tagline, 14, 40);
   
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
@@ -4367,7 +4356,7 @@ async function sendInvoiceEmail(invoice, customer, getToken) {
     const { jsPDF, autoTable } = await loadPdfLibraries();
     // Generate PDF as base64
     const doc = new jsPDF();
-    const brandColor = [99, 102, 241];
+    const brandColor = BRAND_RGB.primary;
     
     // Same PDF generation logic
     doc.setFont("helvetica", "bold");
@@ -4378,9 +4367,8 @@ async function sendInvoiceEmail(invoice, customer, getToken) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text("CRM Pro Inc.", 14, 35);
-    doc.text("123 Business Ave, Suite 100", 14, 40);
-    doc.text("support@crmpro.com", 14, 45);
+    doc.text(PRODUCT_BRAND.name, 14, 35);
+    doc.text(PRODUCT_BRAND.tagline, 14, 40);
     
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);

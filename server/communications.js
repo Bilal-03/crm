@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { BRAND_COLORS, PRODUCT_BRAND } from '../brand.js';
 
 export class CommunicationProviderError extends Error {
   constructor(code, message) {
@@ -33,7 +34,7 @@ export function createEmailProvider(env = process.env) {
           to: [recipient],
           subject,
           text: bodyText,
-          html: bodyHtml || textToHtml(bodyText),
+          html: brandEmailHtml(bodyText, bodyHtml),
         }, { idempotencyKey });
       } catch (error) {
         throw new CommunicationProviderError('provider_unreachable', providerMessage(error));
@@ -51,6 +52,11 @@ export function textToHtml(value) {
     .split(/\r?\n/)
     .map(line => line ? `<p>${escapeHtml(line)}</p>` : '<p><br></p>')
     .join('');
+}
+
+export function brandEmailHtml(bodyText, bodyHtml) {
+  const content = bodyHtml || textToHtml(bodyText);
+  return `<!doctype html><html><body style="margin:0;background:#F4F8FB;color:${BRAND_COLORS.text};font-family:Arial,Helvetica,sans-serif;line-height:1.6"><div style="max-width:620px;margin:24px auto;padding:0 16px"><div style="border-radius:16px 16px 0 0;background:${BRAND_COLORS.ink};padding:20px 24px"><div style="font-size:20px;font-weight:800;letter-spacing:-.04em;color:#fff">CRM <span style="color:${BRAND_COLORS.accent}">Pro</span></div><div style="margin-top:4px;color:rgba(255,255,255,.65);font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase">${escapeHtml(PRODUCT_BRAND.tagline)}</div></div><div style="border:1px solid ${BRAND_COLORS.border};border-top:0;border-radius:0 0 16px 16px;background:#fff;padding:28px 24px">${content}<div style="margin-top:28px;padding-top:16px;border-top:1px solid ${BRAND_COLORS.border};color:${BRAND_COLORS.muted};font-size:12px">Sent from ${escapeHtml(PRODUCT_BRAND.name)}.</div></div></div></body></html>`;
 }
 
 export function providerMessage(error) {

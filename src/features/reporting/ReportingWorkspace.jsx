@@ -116,10 +116,10 @@ export default function ReportingWorkspace({ request, pipelines = [], members = 
 
       <section className="grid gap-6 xl:grid-cols-2">
         <ChartCard title="Collected revenue" description={`Settled ${selectedCurrency} payments by payment date.`}>
-          {(report?.revenueTrend || []).length ? <ResponsiveContainer width="100%" height={280}><LineChart data={report.revenueTrend}><CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" /><XAxis dataKey="date" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={value => money(value)} /><Line type="monotone" dataKey="revenue" stroke="#4f46e5" strokeWidth={3} dot={false} /></LineChart></ResponsiveContainer> : <EmptyChart text="No settled payments in this period." />}
+          {(report?.revenueTrend || []).length ? <ResponsiveContainer width="100%" height={280}><LineChart data={report.revenueTrend}><CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" /><XAxis dataKey="date" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={value => money(value)} /><Line type="monotone" dataKey="revenue" stroke="var(--crm-primary)" strokeWidth={3} dot={false} /></LineChart></ResponsiveContainer> : <EmptyChart text="No settled payments in this period." />}
         </ChartCard>
         <ChartCard title="Source-to-revenue" description="Won deal amount by lead source for the selected period.">
-          {(report?.sourcePerformance || []).length ? <ResponsiveContainer width="100%" height={280}><BarChart data={report.sourcePerformance}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" /><XAxis dataKey="source" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={value => money(value)} /><Bar dataKey="wonAmount" name="Won amount" fill="#8b5cf6" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer> : <EmptyChart text="No source performance data for these filters." />}
+          {(report?.sourcePerformance || []).length ? <ResponsiveContainer width="100%" height={280}><BarChart data={report.sourcePerformance}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" /><XAxis dataKey="source" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={value => money(value)} /><Bar dataKey="wonAmount" name="Won amount" fill="var(--crm-accent-strong)" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer> : <EmptyChart text="No source performance data for these filters." />}
         </ChartCard>
       </section>
 

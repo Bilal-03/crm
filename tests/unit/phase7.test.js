@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createEmailProvider, textToHtml } from '../../server/communications.js';
+import { brandEmailHtml, createEmailProvider, textToHtml } from '../../server/communications.js';
 import { validateEmailTemplate, validateOutboundMessage } from '../../server/validation.js';
 
 const TARGET_ID = '11111111-1111-4111-8111-111111111111';
@@ -38,4 +38,11 @@ test('provider-neutral email rendering escapes untrusted plain text', () => {
   assert.equal(provider.name, 'resend');
   assert.equal(provider.configured, false);
   assert.match(provider.configurationError, /RESEND_API_KEY/);
+});
+
+test('CRM Pro email presentation uses the shared brand and preserves the text fallback', () => {
+  const html = brandEmailHtml('Hello <customer>');
+  assert.match(html, /CRM <span[^>]*>Pro<\/span>/);
+  assert.match(html, /Revenue in motion/);
+  assert.match(html, /Hello &lt;customer&gt;/);
 });

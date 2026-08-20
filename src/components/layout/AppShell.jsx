@@ -2,7 +2,7 @@ import React from 'react';
 
 export function AppShell({ sidebar, sidebarOverlay, header, mobileNav, children }) {
   return (
-    <div className="flex h-screen overflow-hidden font-sans bg-gray-50 text-gray-900">
+    <div className="crm-app-shell flex h-screen overflow-hidden font-sans">
       {sidebar}
       {sidebarOverlay}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

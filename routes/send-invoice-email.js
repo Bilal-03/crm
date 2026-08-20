@@ -6,6 +6,7 @@ import { financialAuditQuery } from '../server/financial-records.js';
 import { getRequiredId, HttpError, json, withApiRoute } from '../server/http.js';
 import { getActiveWorkspace } from '../server/workspaces.js';
 import { canAccessAllRecords } from '../server/authorization.js';
+import { BRAND_COLORS, PRODUCT_BRAND } from '../brand.js';
 
 const MAX_PDF_BYTES = 3 * 1024 * 1024;
 
@@ -109,11 +110,20 @@ function decodePdf(value) {
 
 function invoiceEmailHtml(invoice) {
   return `
-    <p>Hello ${escapeHtml(invoice.name)},</p>
-    <p>Please find invoice <strong>${escapeHtml(invoice.invoice_number)}</strong> attached.</p>
-    <p>Amount due: <strong>${escapeHtml(formatCurrency(invoice.balance_due, invoice.currency))}</strong><br>
-       Due date: ${escapeHtml(String(invoice.due_date))}</p>
-    <p>Thank you for your business${invoice.legal_name ? ` with ${escapeHtml(invoice.legal_name)}` : ''}.</p>
+    <div style="font-family:Arial,Helvetica,sans-serif;max-width:620px;margin:24px auto;background:#fff;border:1px solid ${BRAND_COLORS.border};border-radius:16px;overflow:hidden;color:${BRAND_COLORS.text};line-height:1.6">
+      <div style="background:${BRAND_COLORS.ink};padding:20px 24px;color:#fff">
+        <div style="font-size:20px;font-weight:800;letter-spacing:-.04em">CRM <span style="color:${BRAND_COLORS.accent}">Pro</span></div>
+        <div style="margin-top:4px;color:rgba(255,255,255,.65);font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase">${escapeHtml(PRODUCT_BRAND.tagline)}</div>
+      </div>
+      <div style="padding:28px 24px">
+        <p>Hello ${escapeHtml(invoice.name)},</p>
+        <p>Please find invoice <strong>${escapeHtml(invoice.invoice_number)}</strong> attached.</p>
+        <p>Amount due: <strong>${escapeHtml(formatCurrency(invoice.balance_due, invoice.currency))}</strong><br>
+           Due date: ${escapeHtml(String(invoice.due_date))}</p>
+        <p>Thank you for your business${invoice.legal_name ? ` with ${escapeHtml(invoice.legal_name)}` : ''}.</p>
+        <p style="margin-top:28px;padding-top:16px;border-top:1px solid ${BRAND_COLORS.border};color:${BRAND_COLORS.muted};font-size:12px">Sent from ${escapeHtml(PRODUCT_BRAND.name)}.</p>
+      </div>
+    </div>
   `;
 }
 

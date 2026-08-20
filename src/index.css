@@ -3,16 +3,53 @@
 @tailwind utilities;
 
 :root {
-  --crm-brand: #6366f1;
-  --crm-brand-dark: #5558d9;
-  --crm-accent: #8b5cf6;
+  --crm-ink: #0b1f33;
+  --crm-ink-strong: #071521;
+  --crm-primary: #0f766e;
+  --crm-brand: #0f766e;
+  --crm-brand-dark: #0b5f59;
+  --crm-accent: #5eead4;
+  --crm-accent-strong: #2dd4bf;
   --crm-surface: #ffffff;
-  --crm-page: #f9fafb;
-  --crm-border: #e5e7eb;
-  --crm-text: #111827;
-  --crm-muted: #6b7280;
+  --crm-page: #f4f8fb;
+  --crm-border: #d9e5ec;
+  --crm-text: #0f2438;
+  --crm-muted: #627d98;
+  --crm-focus: #14b8a6;
   --crm-radius: 1rem;
-  --crm-shadow: 0 1px 2px rgb(17 24 39 / 0.04), 0 4px 14px rgb(17 24 39 / 0.04);
+  --crm-shadow: 0 1px 2px rgb(11 31 51 / 0.04), 0 12px 30px rgb(11 31 51 / 0.06);
+}
+
+body {
+  background: var(--crm-page);
+  color: var(--crm-text);
+}
+
+.crm-app-shell {
+  background: var(--crm-page);
+  color: var(--crm-text);
+}
+
+.crm-sidebar {
+  background: var(--crm-ink);
+  color: rgb(255 255 255 / 0.76);
+}
+
+.crm-sidebar .border-gray-200 {
+  border-color: rgb(255 255 255 / 0.1);
+}
+
+.crm-sidebar .crm-nav-item {
+  color: rgb(255 255 255 / 0.72);
+}
+
+.crm-sidebar .crm-nav-item:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: white;
+}
+
+.crm-header {
+  background: rgb(255 255 255 / 0.88);
 }
 
 @layer components {
@@ -27,7 +64,11 @@
 
   .crm-btn-primary {
     @apply text-white shadow-sm hover:shadow-md;
-    background: linear-gradient(135deg, var(--crm-brand), var(--crm-accent));
+    background: linear-gradient(135deg, var(--crm-primary), #0b7285);
+  }
+
+  .crm-btn-primary:hover {
+    background: linear-gradient(135deg, var(--crm-brand-dark), #075985);
   }
 
   .crm-btn-secondary {
@@ -36,8 +77,47 @@
   }
 
   .crm-field {
-    @apply rounded-lg border bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-shadow placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500;
+    @apply rounded-lg border bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition-shadow placeholder:text-gray-400;
     border-color: var(--crm-border);
+  }
+
+  .crm-field:focus {
+    border-color: var(--crm-focus);
+    box-shadow: 0 0 0 3px rgb(20 184 166 / 0.18);
+  }
+
+  .crm-nav-item {
+    @apply w-full flex items-center gap-3 rounded-xl px-4 py-3 font-medium transition-all;
+    color: #52677b;
+  }
+
+  .crm-nav-item:hover {
+    background: #edf4f7;
+    color: var(--crm-ink);
+  }
+
+  .crm-nav-item-active {
+    background: rgb(94 234 212 / 0.14);
+    color: white;
+    box-shadow: inset 3px 0 0 var(--crm-accent), 0 10px 20px rgb(7 21 33 / 0.16);
+  }
+
+  .crm-nav-item-active:hover {
+    background: rgb(94 234 212 / 0.2);
+    color: white;
+  }
+
+  .crm-brand-avatar {
+    background: linear-gradient(135deg, var(--crm-primary), var(--crm-accent-strong));
+  }
+
+  .crm-mobile-nav-item-active {
+    background: #dff8f3;
+    color: var(--crm-primary);
+  }
+
+  .crm-dashboard-hero {
+    background: linear-gradient(135deg, var(--crm-ink) 0%, #0f4c5c 55%, var(--crm-primary) 100%);
   }
 }
 
@@ -48,7 +128,7 @@
   }
 
   :where(button, a, input, select, textarea):focus-visible {
-    outline: 3px solid rgba(99, 102, 241, 0.45);
+    outline: 3px solid rgb(20 184 166 / 0.42);
     outline-offset: 2px;
   }
 
@@ -65,7 +145,21 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .crm-btn-primary:hover {
-    background: var(--crm-brand-dark);
-  }
+  .crm-btn-primary:hover { transform: translateY(-1px); }
 }
+
+/* Compatibility bridge for the brand-specific utilities used by legacy CRM surfaces. */
+[class~="bg-[#6366F1]"] { background-color: var(--crm-primary) !important; }
+[class~="text-[#6366F1]"] { color: var(--crm-primary) !important; }
+[class~="border-[#6366F1]"] { border-color: var(--crm-primary) !important; }
+[class~="ring-[#6366F1]"] { --tw-ring-color: var(--crm-focus) !important; }
+[class~="shadow-[#6366F1]/30"] { --tw-shadow-color: rgb(15 118 110 / 0.3) !important; }
+[class~="shadow-[#6366F1]/20"] { --tw-shadow-color: rgb(15 118 110 / 0.2) !important; }
+[class~="shadow-[#6366F1]/50"] { --tw-shadow-color: rgb(15 118 110 / 0.5) !important; }
+[class*="from-[#6366F1]"] { --tw-gradient-from: var(--crm-primary) var(--tw-gradient-from-position) !important; --tw-gradient-to: rgb(15 118 110 / 0) var(--tw-gradient-to-position) !important; }
+[class*="to-[#8B5CF6]"] { --tw-gradient-to: var(--crm-accent-strong) var(--tw-gradient-to-position) !important; }
+[class~="text-[#8B5CF6]"] { color: var(--crm-primary) !important; }
+[class~="bg-[#8B5CF6]/10"] { background-color: rgb(15 118 110 / 0.1) !important; }
+[class~="hover:bg-[#5558d9]"]:hover { background-color: var(--crm-brand-dark) !important; }
+[class~="hover:text-[#4f46e5]"]:hover { color: var(--crm-brand-dark) !important; }
+[class~="hover:text-[#8B5CF6]"]:hover { color: var(--crm-primary) !important; }

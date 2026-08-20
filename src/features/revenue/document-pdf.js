@@ -1,3 +1,5 @@
+import { BRAND_RGB, PRODUCT_BRAND } from '../../../brand.js';
+
 export async function createFinancialPdf(document, settings, kind = 'invoice') {
   const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
     import('jspdf'),
@@ -17,12 +19,17 @@ export async function createFinancialPdf(document, settings, kind = 'invoice') {
   };
 
   pdf.setFontSize(20);
-  pdf.text(settings?.legal_name || settings?.name || 'CRM Pro', 14, 18);
+  pdf.setTextColor(...BRAND_RGB.primary);
+  pdf.text(settings?.legal_name || settings?.name || PRODUCT_BRAND.name, 14, 18);
+  pdf.setFontSize(9);
+  pdf.setTextColor(...BRAND_RGB.muted);
+  pdf.text(PRODUCT_BRAND.tagline, 14, 24);
   pdf.setFontSize(11);
+  pdf.setTextColor(...BRAND_RGB.text);
   const address = settings?.billing_address || {};
   const addressText = [address.line1, address.line2, address.city, address.region, address.postal_code, address.country].filter(Boolean).join(', ');
-  if (addressText) pdf.text(addressText, 14, 25, { maxWidth: 110 });
-  if (settings?.tax_registration_id) pdf.text(`Tax ID: ${settings.tax_registration_id}`, 14, 32);
+  if (addressText) pdf.text(addressText, 14, 31, { maxWidth: 110 });
+  if (settings?.tax_registration_id) pdf.text(`Tax ID: ${settings.tax_registration_id}`, 14, 38);
   pdf.setFontSize(18);
   pdf.text(title, 196, 18, { align: 'right' });
   pdf.setFontSize(10);
@@ -51,7 +58,7 @@ export async function createFinancialPdf(document, settings, kind = 'invoice') {
       ['Total', '', '', money(document.total_amount)],
     ],
     styles: { fontSize: 9 },
-    headStyles: { fillColor: [79, 70, 229] },
+    headStyles: { fillColor: BRAND_RGB.primary },
   });
   const finalY = pdf.lastAutoTable?.finalY || 120;
   if (document.terms) pdf.text(`Terms: ${document.terms}`, 14, finalY + 12, { maxWidth: 180 });
