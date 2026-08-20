@@ -101,12 +101,13 @@ export default function handler(req, res) {
 }
 
 function getRoute(req) {
+  const routeParam = req.query?.route;
+  if (Array.isArray(routeParam)) return routeParam.map(decodeURIComponent).join('/');
+  if (typeof routeParam === 'string' && routeParam) return decodeURIComponent(routeParam);
+
   const requestUrl = typeof req.url === 'string' ? req.url : '/';
   const pathname = new URL(requestUrl, 'http://localhost').pathname;
   const apiPath = pathname.replace(/^\/api\/?/, '').replace(/^\/+|\/+$/g, '');
   if (apiPath && apiPath !== pathname) return decodeURIComponent(apiPath);
-
-  const routeParam = req.query?.route;
-  if (Array.isArray(routeParam)) return routeParam.map(decodeURIComponent).join('/');
-  return typeof routeParam === 'string' ? decodeURIComponent(routeParam) : apiPath;
+  return apiPath;
 }

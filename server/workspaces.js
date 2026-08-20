@@ -1,11 +1,27 @@
 import { HttpError } from './http.js';
 import { ensureDefaultPipeline } from './pipelines.js';
 
+const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 /**
- * Resolves the caller's personal workspace. Every existing account receives one
- * during migration; this upsert also makes first sign-in provisioning safe.
+ * Resolves the caller's personal workspace. The common path is read-only;
+ * provisioning writes and default-pipeline creation run only on first sign-in.
  */
 export async function getPersonalWorkspace(sql, userId) {
+  const existing = await sql`
+    SELECT w.id, w.owner_user_id, w.name, w.base_currency, w.timezone, w.legal_name,
+           w.billing_email, w.billing_phone, w.billing_address, w.tax_registration_id,
+           w.quote_prefix, w.invoice_prefix, w.credit_note_prefix,
+           w.default_quote_terms, w.default_invoice_terms,
+           m.role
+    FROM workspaces w
+    LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = ${userId}
+    WHERE w.owner_user_id = ${userId}
+    ORDER BY w.created_at ASC
+    LIMIT 1
+  `;
+  if (existing[0]?.role) return existing[0];
+
   const rows = await sql`
     INSERT INTO workspaces (owner_user_id, name)
     VALUES (${userId}, 'Personal CRM')
@@ -20,20 +36,22 @@ export async function getPersonalWorkspace(sql, userId) {
   await sql`
     INSERT INTO workspace_members (workspace_id, user_id, role)
     VALUES (${workspace.id}, ${userId}, 'owner')
-    ON CONFLICT (workspace_id, user_id) DO NOTHING
+    ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = 'owner'
   `;
 
   const result = { ...workspace, role: 'owner' };
-  await ensureDefaultPipeline(sql, result, userId);
+  const pipeline = await sql`
+    SELECT id FROM pipelines WHERE workspace_id = ${workspace.id} LIMIT 1
+  `;
+  if (!pipeline[0]) await ensureDefaultPipeline(sql, result, userId);
   return result;
 }
 
 export async function getActiveWorkspace(sql, userId, requestedWorkspaceId) {
-  const personalWorkspace = await getPersonalWorkspace(sql, userId);
   const requestedId = Array.isArray(requestedWorkspaceId) ? requestedWorkspaceId[0] : requestedWorkspaceId;
 
-  if (!requestedId || requestedId === personalWorkspace.id) return personalWorkspace;
-  if (typeof requestedId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedId)) {
+  if (!requestedId) return getPersonalWorkspace(sql, userId);
+  if (typeof requestedId !== 'string' || !WORKSPACE_ID_PATTERN.test(requestedId)) {
     throw new HttpError(400, 'invalid_workspace', 'Invalid workspace selection.');
   }
 
@@ -48,7 +66,6 @@ export async function getActiveWorkspace(sql, userId, requestedWorkspaceId) {
     WHERE m.workspace_id = ${requestedId} AND m.user_id = ${userId}
   `;
   if (!rows[0]) throw new HttpError(403, 'workspace_access_denied', 'You do not have access to this workspace.');
-  await ensureDefaultPipeline(sql, rows[0], userId);
   return rows[0];
 }
 

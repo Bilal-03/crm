@@ -11,6 +11,7 @@ const apiFiles = {
   summary: fs.readFileSync(new URL('../../routes/deals/summary.js', import.meta.url), 'utf8'),
   conversion: fs.readFileSync(new URL('../../server/core-model.js', import.meta.url), 'utf8'),
 };
+const workspaceSource = fs.readFileSync(new URL('../../server/workspaces.js', import.meta.url), 'utf8');
 
 test('Phase 2 resource APIs establish a workspace boundary before querying new objects', () => {
   for (const [resource, source] of Object.entries(apiFiles)) {
@@ -20,6 +21,15 @@ test('Phase 2 resource APIs establish a workspace boundary before querying new o
     assert.match(source, /workspace_id/);
   }
   assert.match(apiFiles.conversion, /workspace_id = \$\{workspace\.id\}/);
+});
+
+test('workspace resolution keeps routine API requests on the read-only fast path', () => {
+  const activeWorkspaceBody = workspaceSource.slice(
+    workspaceSource.indexOf('export async function getActiveWorkspace'),
+    workspaceSource.indexOf('export async function assertWorkspaceMember'),
+  );
+  assert.doesNotMatch(activeWorkspaceBody, /ensureDefaultPipeline/);
+  assert.match(workspaceSource, /if \(!pipeline\[0\]\) await ensureDefaultPipeline/);
 });
 test('Phase 2 APIs preserve idempotency, real amounts and stage-history metadata', () => {
   assert.match(apiFiles.conversion, /ON CONFLICT \(workspace_id, source_lead_id\)/);

@@ -4,6 +4,13 @@
     { "path": "/api/automation-worker", "schedule": "0 5 * * *" }
   ],
   "rewrites": [
+    { "source": "/api/leads/bulk", "destination": "/api/router?route=leads%2Fbulk" },
+    { "source": "/api/leads/convert", "destination": "/api/router?route=leads%2Fconvert" },
+    { "source": "/api/deals/summary", "destination": "/api/router?route=deals%2Fsummary" },
+    { "source": "/api/invoices/actions", "destination": "/api/router?route=invoices%2Factions" },
+    { "source": "/api/quotes/actions", "destination": "/api/router?route=quotes%2Factions" },
+    { "source": "/api/payments/actions", "destination": "/api/router?route=payments%2Factions" },
+    { "source": "/api/reports/export", "destination": "/api/router?route=reports%2Fexport" },
     {
       "source": "/((?!api(?:/|$)).*)",
       "destination": "/index.html"
