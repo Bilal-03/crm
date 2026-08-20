@@ -70,6 +70,7 @@ import { EmptyState } from './src/components/ui/EmptyState.jsx';
 import SalesWorkspace from './src/features/sales/SalesWorkspace.jsx';
 import ProductivityWorkspace from './src/features/productivity/ProductivityWorkspace.jsx';
 import RevenueWorkspace from './src/features/revenue/RevenueWorkspace.jsx';
+import ReportingWorkspace from './src/features/reporting/ReportingWorkspace.jsx';
 
 let pdfLibrariesPromise;
 const loadPdfLibraries = () => {
@@ -417,7 +418,6 @@ export default function CRMApp() {
   const [deals, setDeals] = useState([]);
   const [pipelines, setPipelines] = useState([]);
   const [dashboardTrendRange, setDashboardTrendRange] = useState('7');
-  const [reportRangeDays, setReportRangeDays] = useState(30);
   
   // UI states
   const [selectedLead, setSelectedLead] = useState(null);
@@ -589,29 +589,13 @@ export default function CRMApp() {
     staleTime: 30_000,
   });
 
-  const reportQuery = useQuery({
-    queryKey: ['reports', activeWorkspaceId || 'default', reportRangeDays],
-    queryFn: () => fetchApi(`/reports?rangeDays=${reportRangeDays}`),
-    enabled: Boolean(user && currentPage === 'reports'),
-    staleTime: 30_000,
-  });
-
   const dashboardData = dashboardQuery.data ?? null;
-  const reportData = reportQuery.data ?? null;
-  const reportLoading = reportQuery.isPending || reportQuery.isFetching;
 
   useEffect(() => {
     if (dashboardQuery.error) {
       console.error('Error loading dashboard aggregates:', dashboardQuery.error);
     }
   }, [dashboardQuery.error]);
-
-  useEffect(() => {
-    if (reportQuery.error) {
-      console.error('Error loading reports:', reportQuery.error);
-      notify(reportQuery.error.message || 'Reports could not be loaded.', 'error');
-    }
-  }, [reportQuery.error]);
 
   const refreshTeam = async () => {
     try {
@@ -1398,11 +1382,11 @@ export default function CRMApp() {
             )}
 
             {currentPage === 'reports' && (
-              <ReportsPage
-                reportData={reportData}
-                loading={reportLoading}
-                rangeDays={reportRangeDays}
-                onRangeChange={setReportRangeDays}
+              <ReportingWorkspace
+                request={fetchApi}
+                pipelines={pipelines}
+                members={teamData?.members || []}
+                onNotify={notify}
               />
             )}
 
@@ -2526,90 +2510,6 @@ function Dashboard({ stats, summary, trendRange = '7', onTrendRangeChange, activ
           </div>
         </motion.div>
       )}
-    </motion.div>
-  );
-}
-
-function ReportsPage({ reportData, loading, rangeDays, onRangeChange }) {
-  const metrics = reportData?.metrics || {};
-  const sourceData = reportData?.sourceData || [];
-  const stageCounts = new Map((reportData?.funnelData || []).map(item => [item.stage, item.count]));
-  const funnelData = PIPELINE_STAGES.map(stage => ({
-    name: stage.label,
-    count: Number(stageCounts.get(stage.id) || 0),
-    color: stage.color,
-  }));
-  const hasFunnelData = funnelData.some(item => item.count > 0);
-
-  return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-      <PageHeader
-        title="Reports"
-        description="Measure the lead, pipeline, and revenue signals that guide your next decisions."
-        actions={(
-          <select aria-label="Reporting period" value={rangeDays} onChange={event => onRangeChange(Number(event.target.value))} className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 focus:ring-2 focus:ring-[#6366F1]">
-            <option value={30}>Last 30 days</option>
-            <option value={90}>Last 90 days</option>
-            <option value={365}>Last 12 months</option>
-          </select>
-        )}
-      />
-
-      {loading && <p className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-800">Loading trusted report totals…</p>}
-
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Report summary">
-        <StatCard label="New leads" value={metrics.newLeads ?? 0} icon={Users} color="#6366F1" />
-        <StatCard label="Deals won" value={metrics.dealsWon ?? 0} icon={CheckCircle2} color="#10B981" />
-        <StatCard label="Close rate" value={`${metrics.closeRate ?? 0}%`} icon={TrendingUp} color="#8B5CF6" />
-        <StatCard label="Revenue collected" value={`$${Number(metrics.revenueCollected || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={DollarSign} color="#059669" />
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="mb-5">
-            <h2 className="text-lg font-bold text-gray-900">Lead sources</h2>
-            <p className="mt-1 text-sm text-gray-500">Where new leads originated during this period.</p>
-          </div>
-          {sourceData.length ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={sourceData} layout="vertical" margin={{ left: 12 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                <XAxis type="number" allowDecimals={false} stroke="#94a3b8" />
-                <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} stroke="#64748b" />
-                <RechartsTooltip />
-                <Bar dataKey="count" name="Leads" fill="#6366F1" radius={[0, 6, 6, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : <p className="py-24 text-center text-sm text-gray-500">No leads were created in this reporting period.</p>}
-        </div>
-
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="mb-5">
-            <h2 className="text-lg font-bold text-gray-900">Pipeline funnel</h2>
-            <p className="mt-1 text-sm text-gray-500">Current lead stage distribution across the workspace.</p>
-          </div>
-          {hasFunnelData ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={funnelData} margin={{ top: 8, right: 8, left: -20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} stroke="#64748b" />
-                <YAxis allowDecimals={false} stroke="#94a3b8" />
-                <RechartsTooltip />
-                <Bar dataKey="count" name="Leads" fill="#8B5CF6" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : <p className="py-24 text-center text-sm text-gray-500">Add leads to begin tracking stage distribution.</p>}
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
-        <h2 className="text-lg font-bold text-gray-900">Activity snapshot</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Meetings scheduled</p><p className="mt-2 text-2xl font-bold text-gray-900">{metrics.meetingsScheduled ?? 0}</p></div>
-          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Paid invoices</p><p className="mt-2 text-2xl font-bold text-gray-900">{metrics.paidInvoices ?? 0}</p></div>
-          <div className="rounded-xl bg-gray-50 p-4"><p className="text-sm text-gray-500">Average leads / day</p><p className="mt-2 text-2xl font-bold text-gray-900">{Number(metrics.averageLeadsPerDay || 0).toFixed(1)}</p></div>
-        </div>
-      </section>
     </motion.div>
   );
 }

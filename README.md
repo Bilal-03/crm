@@ -14,6 +14,7 @@ CRM Pro is a full-stack React application designed for small teams that need one
 | Customers | Closed-won customer profiles and contact details |
 | Meetings | Upcoming and past meetings, Google Calendar links, and Google Meet links |
 | Revenue | Versioned quotes, protected invoice lifecycle, payments, credit notes, multi-currency PDFs, delivery history, and audit events |
+| Reporting | Currency-safe pipeline forecasts, deal outcomes, sales velocity, stage conversion/aging, owner/source performance, and filtered CSV exports |
 | Authentication | Clerk sign-in with tenant-scoped data access |
 | Notifications | In-app success and error feedback for important actions |
 
@@ -210,7 +211,8 @@ npm run smoke:fresh-db # Verify the required Phase 2 schema on an isolated datab
 | `/api/financial-events` | GET | Immutable audit events and invoice delivery history |
 | `/api/leads/bulk` | POST | Transactional bulk lead update/delete |
 | `/api/dashboard` | GET | Tenant-scoped dashboard aggregates and trends |
-| `/api/reports` | GET | Tenant-scoped period report aggregates |
+| `/api/reports` | GET | Tenant-scoped Deal, Stage History, Activity, Invoice and Payment aggregates with server-side date, currency, owner, pipeline and source filters |
+| `/api/reports/export` | GET | Bounded, filtered export rows for management-report CSV downloads |
 | `/api/send-invoice-email` | POST | Generates and sends an invoice email through Resend |
 
 Collection responses use a consistent envelope:

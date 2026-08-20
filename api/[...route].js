@@ -23,6 +23,7 @@ import quoteActions from '../routes/quotes/actions.js';
 import financialEvents from '../routes/financial-events.js';
 import financialSettings from '../routes/financial-settings.js';
 import reports from '../routes/reports.js';
+import reportExport from '../routes/reports/export.js';
 import savedViews from '../routes/saved-views.js';
 import search from '../routes/search.js';
 import sendInvoiceEmail from '../routes/send-invoice-email.js';
@@ -54,6 +55,7 @@ const routeHandlers = {
   'financial-events': financialEvents,
   'financial-settings': financialSettings,
   reports,
+  'reports/export': reportExport,
   'saved-views': savedViews,
   search,
   'send-invoice-email': sendInvoiceEmail,

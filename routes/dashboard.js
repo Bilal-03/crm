@@ -22,18 +22,24 @@ export default withApiRoute({
         WHERE workspace_id = ${workspace.id}
       `,
       sql`
-        SELECT
-          COUNT(*)::int AS total,
-          COUNT(*) FILTER (WHERE status = 'paid')::int AS paid,
-          COUNT(*) FILTER (WHERE status = 'draft')::int AS draft,
-          COUNT(*) FILTER (WHERE status NOT IN ('paid', 'cancelled') AND due_date < CURRENT_DATE)::int AS overdue,
-          COALESCE(SUM(total_amount) FILTER (WHERE status = 'paid'), 0)::numeric AS total_revenue,
-          COALESCE(SUM(balance_due) FILTER (WHERE status NOT IN ('paid', 'cancelled')), 0)::numeric AS outstanding,
-          COALESCE(SUM(total_amount) FILTER (
-            WHERE status = 'paid' AND COALESCE(paid_at::date, invoice_date) >= date_trunc('month', CURRENT_DATE)::date
-          ), 0)::numeric AS this_month_revenue
-        FROM invoices
-        WHERE workspace_id = ${workspace.id}
+        WITH invoice_summary AS (
+          SELECT COUNT(*)::int AS total,
+                 COUNT(*) FILTER (WHERE status = 'paid')::int AS paid,
+                 COUNT(*) FILTER (WHERE status = 'draft')::int AS draft,
+                 COUNT(*) FILTER (WHERE status NOT IN ('paid', 'cancelled', 'void') AND due_date < CURRENT_DATE)::int AS overdue,
+                 COALESCE(SUM(balance_due) FILTER (
+                   WHERE currency = ${workspace.base_currency} AND status NOT IN ('paid', 'cancelled', 'void')
+                 ), 0)::numeric AS outstanding
+          FROM invoices WHERE workspace_id = ${workspace.id}
+        ), payment_summary AS (
+          SELECT COALESCE(SUM(amount) FILTER (WHERE status = 'settled' AND currency = ${workspace.base_currency}), 0)::numeric AS total_revenue,
+                 COALESCE(SUM(amount) FILTER (
+                   WHERE status = 'settled' AND currency = ${workspace.base_currency}
+                     AND payment_date >= date_trunc('month', CURRENT_DATE)::date
+                 ), 0)::numeric AS this_month_revenue
+          FROM payments WHERE workspace_id = ${workspace.id}
+        )
+        SELECT * FROM invoice_summary CROSS JOIN payment_summary
       `,
       sql`
         SELECT COUNT(*) FILTER (WHERE date_time > NOW())::int AS upcoming
@@ -64,13 +70,13 @@ export default withApiRoute({
         ORDER BY day
       `,
       sql`
-        SELECT COALESCE(paid_at::date, invoice_date) AS day, COALESCE(SUM(total_amount), 0)::numeric AS revenue
-        FROM invoices
-        WHERE workspace_id = ${workspace.id}
-          AND status = 'paid'
-          AND COALESCE(paid_at::date, invoice_date) >= CURRENT_DATE - ${trendDays - 1}::int
-          AND COALESCE(paid_at::date, invoice_date) < CURRENT_DATE + 1
-        GROUP BY COALESCE(paid_at::date, invoice_date)
+        SELECT payment_date AS day, COALESCE(SUM(amount), 0)::numeric AS revenue
+        FROM payments
+        WHERE workspace_id = ${workspace.id} AND status = 'settled'
+          AND currency = ${workspace.base_currency}
+          AND payment_date >= CURRENT_DATE - ${trendDays - 1}::int
+          AND payment_date < CURRENT_DATE + 1
+        GROUP BY payment_date
         ORDER BY day
       `,
       sql`
@@ -111,6 +117,7 @@ export default withApiRoute({
         meetings: { upcoming: Number(meetings.upcoming || 0) },
         reminders: { overdue: Number(reminderRows[0]?.overdue || 0) },
         invoices: {
+          currency: workspace.base_currency,
           total: Number(invoices.total || 0),
           paid: Number(invoices.paid || 0),
           draft: Number(invoices.draft || 0),
